@@ -1,0 +1,209 @@
+---
+title: "Download LASSO Data for the CCD Study"
+output: html_document
+---
+
+# Purpose
+
+This document downloads the LASSO **regular** assessment exports used to
+prepare the Calculus Concept Inventory (CCI) and Calculus Concept Assessment
+(CCA) datasets for this study. It makes the same export request as the supplied Postman collection, but does
+**not** require the Postman desktop application or its JSON files.
+
+The files downloaded here are raw LASSO exports. They are not yet the
+analysis-ready `cci_data_v12.csv` and `cca_data_v12.csv` files used by
+`IJRUME_analysis.R`. Run `datascript2.R` after downloading to apply the
+study's consent, completion-time, item-attempt, and assessment-specific
+cleaning rules.
+
+# Before you begin
+
+## Software and R packages
+
+Use R 4.1 or newer and RStudio, if available. Install the required packages
+once on each computer:
+
+```{r install-packages, eval=FALSE}
+install.packages("httr2")
+```
+
+## No Postman files required
+
+This Rmd contains the LASSO production API and UI addresses required for the
+export request. It can be shared and run as a single file:
+
+```text
+your-project/
+└── download_lasso_data.Rmd
+```
+
+The API and UI addresses are not credentials. This document contains no API
+key, password, token, or student-level data. If LASSO later requires
+authentication, do **not** add credentials to a shared Rmd; store them in a
+local configuration file or use the access method supplied by LASSO.
+
+The download directory contains student-level data. Store the project in an
+approved location, do not share the downloaded CSV files outside approved data
+procedures, and do not commit them to a public repository.
+
+## Run the document
+
+1. Open `download_lasso_data.Rmd` in RStudio.
+2. Edit the `years` and `terms` settings in the **Choose exports** section if
+   needed.
+3. Click **Knit** to generate the HTML report, or run all code chunks
+   interactively.
+4. Find the annual CSV files and combined file in `LASSO_downloads/`.
+
+The first download may take several minutes because each year is requested
+separately.
+
+# LASSO request configuration
+
+```{r setup, message=FALSE}
+required_packages <- "httr2"
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+
+if (length(missing_packages) > 0) {
+  stop(
+    "Install the required packages first: install.packages(c(",
+    paste(sprintf("'%s'", missing_packages), collapse = ", "),
+    "))",
+    call. = FALSE
+  )
+}
+
+library(httr2)
+
+# Production settings obtained from the LASSO Postman environment and a
+# successful export request. These are public service addresses.
+api <- "https://tools-api.lassoeducation.org"
+origin <- "https://tools.lassoeducation.org"
+content_type <- "text/csv"
+```
+
+# Define the download request
+
+The function below requests one year of regular LASSO assessments. The term
+parameter `1,2,3,4` requests all four academic terms.
+
+```{r download-functions}
+download_lasso_regular_export <- function(year, terms = 1:4, destination) {
+  request(paste0(api, "/api/assessments/", year, "/regular/export")) |>
+    req_url_query(term = paste(terms, collapse = ",")) |>
+    req_headers(
+      Origin = origin,
+      `Content-Type` = content_type
+    ) |>
+    req_perform() |>
+    resp_body_raw() |>
+    writeBin(destination)
+
+  destination
+}
+```
+
+# Choose exports
+
+The current study's LASSO data span 2015 through 2025. Change `years` to a
+smaller range, such as `2025`, to download a single year. To request selected
+terms only, change `terms` to values such as `c(1, 3)`.
+
+```{r download-exports}
+years <- 2015:2025
+terms <- 1:4
+download_directory <- "LASSO_downloads"
+dir.create(download_directory, showWarnings = FALSE, recursive = TRUE)
+
+export_files <- vapply(
+  years,
+  function(year) {
+    destination <- file.path(
+      download_directory,
+      sprintf("lasso_regular_%s.csv", year)
+    )
+    download_lasso_regular_export(
+      year,
+      terms = terms,
+      destination = destination
+    )
+  },
+  character(1)
+)
+
+export_files
+```
+
+# Combine annual exports
+
+The annual LASSO exports can have different columns across years. This section
+keeps every column found in any annual file, adds an `export_year` column for
+traceability, and writes one combined CSV. Values unavailable in a particular
+year are recorded as `NA`.
+
+```{r combine-exports}
+# Combine annual exports while retaining the export year for traceability.
+# Align the union of columns because LASSO export schemas can differ by year.
+annual_exports <- lapply(export_files, function(file) {
+    data <- read.csv(file, check.names = FALSE)
+    data$export_year <- as.integer(
+      sub(".*lasso_regular_([0-9]{4})\\.csv$", "\\1", file)
+    )
+    data
+  })
+
+all_columns <- unique(unlist(lapply(annual_exports, names)))
+annual_exports <- lapply(annual_exports, function(data) {
+  missing_columns <- setdiff(all_columns, names(data))
+  data[missing_columns] <- NA
+  data[all_columns]
+})
+
+lasso_regular_data <- do.call(rbind, annual_exports)
+
+combined_file <- file.path(
+  download_directory,
+  sprintf("lasso_regular_%s_%s.csv", min(years), max(years))
+)
+write.csv(lasso_regular_data, combined_file, row.names = FALSE)
+
+data.frame(
+  files = c(export_files, combined_file),
+  rows = c(
+    vapply(annual_exports, nrow, integer(1)),
+    nrow(lasso_regular_data)
+  )
+)
+```
+
+# Output and next steps
+
+The document creates:
+
+| File | Description |
+|---|---|
+| `LASSO_downloads/lasso_regular_YYYY.csv` | Raw regular-assessment export for one year |
+| `LASSO_downloads/lasso_regular_START_END.csv` | Combined raw export, including `export_year` |
+
+These files include more than the CCI and CCA records and are not directly
+used by `IJRUME_analysis.R`. To reproduce the study analysis:
+
+1. Update `datascript2.R` so its raw LASSO input path points to the applicable
+   file in `LASSO_downloads/`. The script currently points to legacy data
+   locations and filenames.
+2. Ensure the separate PCA source file, `pca_8_23_df.csv`, is also available;
+   it is not downloaded from LASSO by this document.
+3. Run `datascript2.R` to create `cci_data_v12.csv`, `cca_data_v12.csv`, and
+   `pca_data.csv`.
+4. Run `IJRUME_analysis.R`.
+
+# Troubleshooting
+
+| Problem | Resolution |
+|---|---|
+| `Install the required packages first` | Run the installation command in **Software and R packages**, then restart R. |
+| HTTP 500 or another HTTP error | Confirm that the production addresses in **LASSO request configuration** are current. If the problem persists, contact the LASSO administrator with the year, assessment type (`regular`), and error status. |
+| Certificate or network error | Connect through the network normally used for LASSO access and contact the LASSO administrator or local IT support. Do not disable certificate validation. |
+| Analysis script cannot find cleaned data | Run `datascript2.R` after downloading; the raw LASSO export is not the final analysis format. |
