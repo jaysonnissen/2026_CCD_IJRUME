@@ -45,6 +45,16 @@ All three are scored against five broad skills: **P**rerequisites,
 **L**imits, **D**erivatives, **A**pplications of **D**erivatives, and
 **I**ntegration.
 
+**A note on `Articles/`:** this document cites several PDFs in `Articles/`
+by path (the two project manuscripts, plus Carlson (2010) and Epstein
+(2013)). That folder is **intentionally not part of this public GitHub
+repo** -- it's local reference material only, since it mixes the project's
+own manuscripts with copyrighted third-party journal articles and other
+material not appropriate to redistribute publicly. `Qmatrices/` (the
+Q-matrix source coding workbooks) *is* pushed, since this document's
+[Reconstructing the 5-skill Q-matrix] chunk reads from it directly and needs
+it to actually run for anyone who clones the repo.
+
 **What this document is not:** it does not contain the actual item wording.
 See [What's missing: item text] for why, and what to do about it.
 
