@@ -43,6 +43,40 @@
 #manuscript -- it fixes all of the above, including the remaining Sankey
 #bug. Run this file only when you need to exactly reproduce the PERC2025 /
 #RUME conference-proceedings analysis as originally run.
+#
+#(Mike 7/22/26) Investigation of the Sankey/skill-profile section (Figure 2
+#of the RUME manuscript), tested by patching a sandbox copy of this script:
+#  - cci_clean/pca_clean (and cca_binary) currently keep any respondent with
+#    a score on EITHER occasion. The bind_cols() crash above only happens
+#    under that population. Restricting to respondents with BOTH pre_score
+#    and post_score present (matched pairs -- the population the paper
+#    actually reports: PCA n=897, CCI n=469) avoids the crash entirely,
+#    because GDINA then drops the same respondents from both the pre and
+#    post fits. I get n=1069 (PCA) / n=538 (CCI) with a simple "both scores
+#    present" filter -- close to the paper's but not exact, so some
+#    additional eligibility rule (item-completion threshold? duration?) is
+#    still unaccounted for.
+#  - Under that matched-pairs population, CCI's profile-transition numbers
+#    reproduce reasonably well (e.g. "00000" group change -16.3% here vs.
+#    -12% in the paper; 82% vs. 89% of no-proficiency starters staying
+#    there) -- same direction, same order of magnitude.
+#  - PCA does NOT reproduce: per-skill marginal mastery actually DECREASES
+#    pretest-to-posttest for Limits (41.1%->35.4%), Applications of
+#    Derivatives (47.8%->38.3%), and Integration (20.4%->18.5%), even though
+#    the raw score rises slightly (45.3->46.8, consistent with the HLM
+#    result) -- driving the "0000" group to grow instead of shrink by 51%
+#    as the paper reports. This doesn't look like a code bug; it looks like
+#    a consequence of fitting the pretest and posttest GDINA models
+#    completely independently, with no shared/invariant item parameters
+#    between them -- unlike the longitudinal 3PL section above, which
+#    explicitly constrains a1/d/g equal across pre/post. PCA's Integration
+#    skill has only 1 item, so independently-refit guessing/slip estimates
+#    for that one item can plausibly flip many students across the mastery
+#    threshold with no real change in proficiency.
+#  - Net: reproducing Figure 2 exactly needs either the exact matched-pairs
+#    eligibility rule Kevin used, or a decision on whether the CDM section
+#    should enforce cross-time invariance the way the IRT section does.
+#    Worth discussing with Jayson before building this into IJRUME_analysis.Rmd.
 
 library(dplyr)
 library(tidyr)

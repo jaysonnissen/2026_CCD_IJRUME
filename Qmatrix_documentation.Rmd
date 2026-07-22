@@ -1,0 +1,439 @@
+---
+title: "Q-matrix Documentation, History, and Reconstruction"
+date: "2026-07-22"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  write_qmatrix: false
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+required_packages <- c("dplyr", "stringr", "readxl", "writexl", "knitr", "tibble", "tidyr", "purrr")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages)) {
+  stop("Install the required packages before rendering: ", paste(missing_packages, collapse = ", "))
+}
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+if (!exists("params")) params <- list(write_qmatrix = FALSE)
+write_qmatrix <- isTRUE(params$write_qmatrix)
+```
+
+# Purpose
+
+This document is the single source of truth for the CCA/CCI/PCA Q-matrix used
+by `IJRUME_analysis.R`/`.Rmd`: where it came from, how it was derived from the
+project's working files, what it means item-by-item, and what remains
+unknown. It **regenerates `Qmatrix.xlsx` from source** (see
+[Generating Qmatrix.xlsx]) rather than treating that file as a hand-edited
+artifact, so the derivation stays auditable and reproducible if the source
+coding workbook changes.
+
+Three instruments are covered:
+
+* **CCA** — Calculus Concept Assessment (17 items)
+* **CCI** — Calculus Concept Inventory (22 items)
+* **PCA** — Precalculus Concept Assessment (25 items; originally Carlson,
+  Oehrtman & Engelke's instrument — see [PCA's original framework: Carlson (2010)])
+
+All three are scored against five broad skills: **P**rerequisites,
+**L**imits, **D**erivatives, **A**pplications of **D**erivatives, and
+**I**ntegration.
+
+**What this document is not:** it does not contain the actual item wording.
+See [What's missing: item text] for why, and what to do about it.
+
+# History: how we got to a 5-skill Q-matrix
+
+This chronology is reconstructed from two sources: the `Roberge_agendas/`
+meeting-notes documents (Kevin Roberge's and Jayson Nissen's dated working
+notes, Jan 2025 -- Mar 2026) and the tab structure of
+`Qmatrices/CCD-second coding.xlsx` itself, which preserves several coding
+iterations side by side.
+
+| When | What happened |
+|---|---|
+| **Jan 2025** | Kevin starts coding the calculus assessments on LASSO (C1CI, CCAv2/CCA, C2CI, CaCI): "Winnow down LOs to less than 50 skills." Registers for RUME 2025. |
+| **Feb 5, 2025** | Confirms LO count needs at least 10 questions per skill to be usable. RUME 2025 paper (submission ID 136, "Moving Beyond Total Scores with Skill-Proficiency Profiles on Concept Inventories") is already under review at this point, already using the 5-skill P/L/D/AD/I scheme per reviewer comments. |
+| **Feb 12, 2025** | Builds a much more granular OpenStax-based codebook: ~162 LOs at a fine level, ~36 at a coarser section level; adds P6 (Algebra Basics) and E1 (Interpretation); codes CCI/CaCI/CCA/PCA/C2CI producing 98 item-codes. This is the 27-LO taxonomy reproduced in full below. |
+| **Feb 26, 2025** | Literature review pass: Carlson (2010, PCA), Epstein (2013, CCI), Gleason et al. (2015), Carlson et al. (2015). Explores running PCA's DINA model using Carlson's *own* original LOs, not the recoded P/L/D/AD/I scheme. |
+| **Mar 7--21, 2025** | Jayson and Kevin add P7 (graphical fluency); build a Q-matrix tab; do an item-by-item KEEP/REMOVE pass on sparsely-coded LOs for CCI and CCA. |
+| **Apr 17--25, 2025** | "Codebook is finished" at ~37 fine-grained LOs (P1--P7, L1--L5, D1--D9, AD1--AD10, I1--I7, E1) -- this is what's preserved in `Qmatrices/Qmatrix.xlsx`'s `CCI`/`CCA`/`PCA` tabs. The **`CCD-second coding.xlsx`** workbook is created around this point, with a `2ndCoding Qs` tab holding "actual Q-matrices and suggested revisions" and a Qval-based fit-improvement pass (Qval is a DINA-model diagnostic that flags items whose empirical response pattern doesn't match their assigned Q-matrix row). |
+| **May 7, 2025** | Explicit statement of the operative scheme: **"For the CCD we are using five Learning Objectives: P: Prerequisite knowledge, L: Limits, D: Derivatives, AD: Applications of Derivatives, I: Introduction to Integration."** Fit statistics compared across a "full Q-matrix," a "5 LO Q-matrix," and a "5 LO Q-matrix, UPDATED from Qval" (1 change to CCA, 2 changes to CCI) -- this last one is the version reconstructed in this document. |
+| **May 21--29, 2025** | "I think what we've done for the PERC paper is fine but I would like to pursue the attribute hierarchies this summer." DINA re-run on a corrected CCA subset; "I have also updated the numbers in the PERC manuscript." |
+| **Jun 4, 2025** | PERC2025 paper submitted. |
+| **Jun 15--18, 2025** | "CCD on LASSO Update... All IRT, DINA (Guess/Slip) and Q updated." Creates a GitHub repo for the project ("Calc Repo") and shares it with Jayson -- this is the likely origin of the code now in *this* repository. Upload checklist includes `Qmatrix.xlsx` (the 5-LO, Qval-updated version) alongside `Calc_IRT.R`, `calc_data_prep.R`, `Cacl_DINA.R`. |
+| **Sep 2025 -- Feb 2026** | Separate RUME conference-proceedings cycle (a second, later RUME submission "recycling" PERC content with updates); accepted ~Oct 31, 2025; presented Feb 26--28, 2026. |
+| **Nov 2025 -- Mar 2026** | Kevin's work shifts to **attribute hierarchies** (e.g., testing whether skills form a strict order P > L > D > AD > I) for the IJRUME journal manuscript and a separate "Skill Hierarchies" paper -- both with their own GitHub repos, distinct from the "Calc Repo." This later work is why `Qmatrices/Qmatrix.xlsx` (39 fine attributes, `CCI_partial`/`CCA_partial`, `PCA_Carlson` variants) looks more evolved than what the conference papers report: **it reflects this later phase, not the 5-LO version the papers actually used.** |
+
+The upshot: there were at least three distinct Q-matrix eras -- (1) an initial
+rough coding used for the RUME 2025 submission, (2) the refined, Qval-updated
+5-LO coding used for the PERC 2025 paper (**this is the version reconstructed
+below**), and (3) ongoing, unfinished attribute-hierarchy work for the IJRUME
+and Skill Hierarchies papers.
+
+# The 27-LO taxonomy behind the 5 broad skills
+
+Before narrowing to P/L/D/AD/I, Kevin built out this fuller taxonomy (from
+`Qmatrices/CCD-second coding.xlsx`, tab `Revised LOs`). Every fine-grained
+code below rolls up into exactly one of the five broad skills used in the
+final Q-matrix.
+
+```{r lo-taxonomy}
+lo_taxonomy <- tribble(
+  ~Skill, ~Code, ~Name, ~Description,
+  "P", "P1", "Foundations of Functions", "Function notation, evaluation, domain/range, graph, zeros/roots, composition, symmetry, table of values",
+  "P", "P2", "Basic Classes of Functions", "Slope/meaning, degree of polynomial, odd/even, rational, power/root, algebraic/transcendental, piecewise, transformations",
+  "P", "P3", "Trigonometric Functions", "Degrees/radians, triangle/unit circle, basic trig identities, graphs and periods, transformations",
+  "P", "P4", "Inverse Functions", "Conditions/test for invertibility, horizontal line test, find inverse, graph inverse, inverse trig",
+  "P", "P5", "Exponential and Logarithmic Functions", "Form of x^b vs b^x, significance of 'e', form of logs, exp vs logs, calculate with logs, hyperbolic functions",
+  "P", "P6", "Algebraic Basics", "Inequalities, proportions",
+  "P", "P7", "Graphical Fluency", NA,
+  "L", "L2", "The Limit of a Function", "Correct notation, limits from table/graph, exist or not, one/two-sided, infinite limit, vertical asymptote",
+  "L", "L3", "The Limit Laws", "Basic limit laws, evaluate by factoring, polynomials, rational functions, conjugates, squeeze theorem",
+  "L", "L4", "Continuity", "Three conditions for continuity at a point, three kinds of discontinuity, continuity on an interval, limits of compositions, IVT",
+  "D", "D1", "Defining the Derivative", "Meaning of tangent line, slope of tangent, derivative as difference quotient, y' at a point, velocity, avg vs instant velocity, y' from a table",
+  "D", "D2", "The Derivative as a Function", "Definition of derivative function, graph y' from y, derivatives and continuity, existence, higher-order derivatives",
+  "D", "D3", "Differentiation Rules", "Constant, power, product, quotient rules; polynomials, rational functions",
+  "D", "D5", "Derivatives of Trig Functions", "Derivatives and higher-order derivatives of sine and cosine (and inverse trig functions)",
+  "D", "D6", "The Chain Rule", "State chain rule for f(g(x)); apply with power/product/quotient rule; apply for f(g(h(x))); describe proof",
+  "D", "D9", "Derivatives of Exp & Log functions", "Derivative of exponential/log functions; logarithmic differentiation",
+  "AD", "AD1", "Related Rates", "Express changing quantities as derivatives, find relationships between derivatives, use chain rule to relate rates",
+  "AD", "AD2", "Linear Approximation and Differentials", "Linearization at a point, graphical use of differentials, relative/percentage error",
+  "AD", "AD3", "Maxima and Minima", "Absolute/local extrema, finding critical points, open vs. closed interval",
+  "AD", "AD5", "Derivatives and shape of a graph", "First/second derivative tests, concavity, inflection points, relationship between y/y'/y''",
+  "AD", "AD6", "Limits at Infinity and Asymptotes", "Limits at infinity, horizontal/oblique asymptotes, end behavior, graphing with y'/y''",
+  "AD", "AD8", "L'Hopital's Rule", "When to apply, indeterminate forms, relative growth rates of functions",
+  "AD", "AD10", "Antiderivatives", "General antiderivative, notation for indefinite integral, power rule, simple IVPs",
+  "I", "I1", "Approximating Areas", "Sigma notation, rectangular-area approximation, Riemann sums",
+  "I", "I2", "The Definite Integral", "Definition, integrand/limits/variable, integrability, net area, average value of a function",
+  "I", "I3", "The Fund. Theorem of Calculus", "MVT for integrals, FTC parts 1 & 2, differentiating integrals, relationship between differentiation and integration",
+  "I", "I5", "Substitution", "Substitution for indefinite and definite integrals",
+  "I", "I6", "Integrals w/ exponential & logarithms", "Integration of exponential and logarithmic functions"
+)
+kable(lo_taxonomy)
+```
+
+Two codes appear in earlier/other coding tabs but are **not** part of this
+27-LO taxonomy or the final Q-matrix: **P6** (Algebraic Basics) and **E1**
+("Interpretation") were proposed additions that didn't survive into the final
+27-LO/5-skill scheme reconstructed here (P6 appears in the taxonomy above but
+with zero items coded to it in the final Q-matrix -- see the item counts
+below).
+
+## Item-count expansion roadmap (as of the CCD-second coding.xlsx timeline tabs)
+
+Separately from the Q-matrix itself, the project has a roadmap for growing
+item coverage per LO toward a "fixed-length" CCD test, targeting 10 items per
+LO by Fall 2027 (`timeline - 10 items` tab; a lower-target `timeline - 6
+items` variant also exists). This contextualizes where thin LOs (e.g., P6,
+P7, D5/D6/D9, most Integration codes) are headed, even though they currently
+have few or zero coded items:
+
+```{r timeline}
+timeline <- tribble(
+  ~Skill, ~Code, ~Name, ~`Active now`, ~`Test Fall 25`, ~`Test Sp 26`, ~`Test Fall 26`, ~`Test Sp 27`, ~`Total by Fall 27`,
+  "P", "P1", "Foundations of Functions", 13, NA, NA, NA, NA, 13,
+  "P", "P2", "Basic Classes of Functions", 18, NA, NA, NA, NA, 18,
+  "P", "P3", "Trigonometric Functions", 1, 4, 5, NA, NA, 10,
+  "P", "P4", "Inverse Functions", 4, NA, NA, 3, 3, 10,
+  "P", "P5", "Exponential and Logarithmic Functions", 5, 2, 3, NA, NA, 10,
+  "P", "P6", "Algebraic Basics", 0, NA, NA, NA, NA, 0,
+  "P", "P7", "Graphical Fluency", 0, NA, NA, NA, NA, 0,
+  "L", "L2", "The Limit of a Function", 9, 1, NA, NA, NA, 10,
+  "L", "L3", "The Limit Laws", 1, NA, NA, NA, NA, 1,
+  "L", "L4", "Continuity", 0, NA, NA, NA, NA, 0,
+  "D", "D1", "Defining the Derivative", 4, 3, 3, NA, NA, 10,
+  "D", "D2", "The Derivative as a Function", 5, 3, 2, NA, NA, 10,
+  "D", "D3", "Differentiation Rules", 0, NA, NA, 5, 5, 10,
+  "D", "D5", "Derivatives of Trig Functions", 0, NA, NA, NA, NA, 0,
+  "D", "D6", "The Chain Rule", 0, NA, NA, NA, NA, 0,
+  "D", "D9", "Derivatives of Exp & Log functions", 0, NA, NA, NA, NA, 0,
+  "AD", "AD1", "Related Rates", 1, NA, NA, NA, NA, 1,
+  "AD", "AD2", "Linear Approximation and Differentials", 1, NA, NA, NA, NA, 1,
+  "AD", "AD3", "Maxima and Minima", 1, NA, NA, 4, 5, 10,
+  "AD", "AD5", "Derivatives and shape of a graph", 6, 2, 2, NA, NA, 10,
+  "AD", "AD6", "Limits at Infinity and Asymptotes", 3, NA, NA, NA, NA, 3,
+  "AD", "AD8", "L'Hopital's Rule", 1, NA, NA, NA, NA, 1,
+  "AD", "AD10", "Antiderivatives", 0, NA, NA, NA, NA, 0,
+  "I", "I1", "Approximating Areas", 0, NA, NA, 5, 5, 10,
+  "I", "I2", "The Definite Integral", 2, 4, 4, NA, NA, 10,
+  "I", "I3", "The Fund. Theorem of Calculus", 1, NA, NA, NA, NA, 1,
+  "I", "I5", "Substitution", 1, NA, NA, NA, NA, 1,
+  "I", "I6", "Integrals w/ exponential & logarithms", 0, NA, NA, NA, NA, 0
+)
+kable(timeline)
+cat("Grand total target across all LOs by Fall 2027: 265 items (10-items-per-LO plan)\n")
+```
+
+## PCA's original framework: Carlson (2010)
+
+PCA was not originally designed around the P/L/D/AD/I scheme -- it's Marilyn
+Carlson's Precalculus Concept Assessment, built around a different construct
+framework:
+
+> Carlson, M., Oehrtman, M., & Engelke, N. (2010). The precalculus concept
+> assessment: A tool for assessing students' reasoning abilities and
+> understandings. *Cognition and Instruction*, 28(2), 113-145.
+
+`Qmatrices/Qmatrix.xlsx`'s `PCA_Carlson` tab preserves Kevin's coding of all
+25 PCA items against Carlson's own 15 sub-construct codes (`R1-R3, ME, MR,
+MC, MI, GL, GE, GR, GN, RG, RA, RN, RC`) before they were recoded into
+P/L/D/AD/I -- but no definitions for those codes exist anywhere in this repo;
+they're only in the source paper, which is **not currently in `Articles/`**.
+Getting a copy would help confirm PCA's construct coverage independent of the
+recoded scheme, and might shed indirect light on item content (see
+[What's missing: item text]).
+
+# Where the Q-matrix data lives, and why most candidates are wrong
+
+Several files in this repo could plausibly be "the Q-matrix." Only one is:
+
+| File | What it actually is |
+|---|---|
+| `Qmatrix.csv` (repo root) | **Not project data.** 20 items x 8 generic attributes named "Item01"/"A1" -- matches the classic Tatsuoka fraction-subtraction dataset bundled as a tutorial example with CDM packages, unrelated to this project. |
+| `Qmatrices/Qmatrix.xlsx` (= `Copy_Qmatrix.xlsx`) | An **intermediate coding stage**: the ~37-code fine-grained taxonomy (P1-P7, L1-L5, D1-D9, AD1-AD10, I1-I7, E1) from Kevin's later (Nov 2025+) attribute-hierarchy work, plus the Carlson-framework tabs. Sheet names are uppercase (`CCI`/`CCA`/`PCA`), which doesn't even match what `IJRUME_analysis.R` expects (`sheet = "cci"` etc., case-sensitive). |
+| `Qmatrices/CCD-second coding.xlsx` | **The source of truth used here.** Sheets `CCI Q`, `CCA Q`, `PCA Q` hold the final, Qval-updated fine-grained coding (11/11/9 attributes respectively) that collapses to the 5-skill scheme used in the papers. |
+| `Qmatrix.xlsx` (repo root) | The reconstructed final Q-matrix, **generated by this document** -- see below. |
+
+# Reconstructing the 5-skill Q-matrix
+
+```{r load-source}
+source_path <- "Qmatrices/CCD-second coding.xlsx"
+stopifnot(file.exists(source_path))
+
+read_fine_qmatrix <- function(sheet) {
+  raw <- suppressMessages(read_excel(source_path, sheet = sheet, col_names = FALSE))
+  header_row <- as.character(unlist(raw[2, ]))
+  item_cols <- which(!is.na(suppressWarnings(as.numeric(header_row))))
+  items <- as.numeric(header_row[item_cols])
+  attr_rows <- raw[-(1:2), ]
+  attr_rows <- attr_rows[!is.na(attr_rows[[1]]), ]
+  attrs <- as.character(attr_rows[[1]])
+  mat <- as.data.frame(attr_rows[, item_cols])
+  mat[] <- lapply(mat, function(x) as.numeric(x) %in% 1)
+  colnames(mat) <- paste0("item", items)
+  rownames(mat) <- attrs
+  mat
+}
+
+collapse_to_skills <- function(fine_mat, skills = c("P", "L", "D", "AD", "I")) {
+  attr_names <- rownames(fine_mat)
+  skill_of <- function(a) {
+    m <- regmatches(a, regexpr("^[A-Za-z]+", a))
+    m
+  }
+  attr_skill <- vapply(attr_names, skill_of, character(1))
+  out <- sapply(skills, function(s) {
+    rows <- fine_mat[attr_skill == s, , drop = FALSE]
+    if (nrow(rows) == 0) return(rep(0L, ncol(fine_mat)))
+    as.integer(colSums(rows, na.rm = TRUE) > 0)
+  })
+  out <- as.data.frame(out)
+  colnames(out) <- skills
+  rownames(out) <- colnames(fine_mat)
+  out
+}
+
+fine_cca <- read_fine_qmatrix("CCA Q")
+fine_cci <- read_fine_qmatrix("CCI Q")
+fine_pca <- read_fine_qmatrix("PCA Q")
+
+q_cca <- collapse_to_skills(fine_cca)
+q_cci <- collapse_to_skills(fine_cci)
+q_pca <- collapse_to_skills(fine_pca)
+```
+
+The fine-grained source coding, before collapsing (rows = the specific LOs
+actually coded to at least one item; columns = item number):
+
+```{r show-fine, results='asis'}
+cat("**CCA** fine attributes used:", paste(rownames(fine_cca), collapse = ", "), "\n\n")
+cat("**CCI** fine attributes used:", paste(rownames(fine_cci), collapse = ", "), "\n\n")
+cat("**PCA** fine attributes used:", paste(rownames(fine_pca), collapse = ", "), "\n\n")
+cat("(PCA has no 'D' fine attribute coded to any item -- consistent with the",
+    "manuscripts' note that no PCA items were coded as assessing Derivatives.)\n")
+```
+
+Collapsed to the 5 broad skills (item x skill, 1 = this item counts toward
+mastery of that skill):
+
+```{r show-collapsed}
+kable(tibble(item = rownames(q_cca), q_cca), caption = "CCA (17 items)")
+kable(tibble(item = rownames(q_cci), q_cci), caption = "CCI (22 items)")
+kable(tibble(item = rownames(q_pca), q_pca[, c("P","L","AD","I")]), caption = "PCA (25 items; no Derivatives-coded items)")
+```
+
+# Verification against the published manuscript
+
+Table IV of `Articles/PERC2025_Roberge.pdf` reports the number of items per
+skill for each instrument's *final* Q-matrix. If this reconstruction is
+correct, collapsing the fine-grained coding above should reproduce those
+counts exactly.
+
+```{r verify}
+published_table_iv <- tribble(
+  ~Instrument, ~P, ~L, ~D, ~AD, ~I,
+  "CCA", 7, 4, 3, 2, 2,
+  "CCI", 6, 3, 6, 6, 1,
+  "PCA", 20, 3, 0, 5, 1
+)
+
+reconstructed_counts <- bind_rows(
+  c(Instrument = "CCA", colSums(q_cca)),
+  c(Instrument = "CCI", colSums(q_cci)),
+  c(Instrument = "PCA", colSums(q_pca))
+) %>% mutate(across(c(P, L, D, AD, I), as.integer))
+
+comparison <- bind_rows(
+  published_table_iv %>% mutate(source = "Published (Table IV)"),
+  reconstructed_counts %>% mutate(source = "Reconstructed here")
+) %>% arrange(Instrument, source)
+
+kable(comparison, caption = "Items-per-skill: published vs. reconstructed")
+
+match_check <- all(
+  reconstructed_counts %>% arrange(Instrument) %>% select(P, L, D, AD, I) ==
+  published_table_iv %>% arrange(Instrument) %>% select(P, L, D, AD, I)
+)
+cat(if (match_check) "MATCH: reconstruction reproduces Table IV exactly.\n"
+    else "MISMATCH -- investigate before trusting Qmatrix.xlsx.\n")
+
+n_items_check <- tribble(
+  ~Instrument, ~n_items, ~paper_says,
+  "CCA", nrow(q_cca), 17,
+  "CCI", nrow(q_cci), 22,
+  "PCA", nrow(q_pca), 25
+)
+kable(n_items_check, caption = "Item count check")
+
+double_coded <- tibble(
+  Instrument = c("CCA", "CCI", "PCA"),
+  n_double_coded = c(sum(rowSums(q_cca) > 1), sum(rowSums(q_cci) > 1), sum(rowSums(q_pca) > 1))
+)
+kable(double_coded, caption = "Items coded to more than one skill (paper says 5 total across all three instruments)")
+cat("Total double-coded:", sum(double_coded$n_double_coded), "(paper says 5)\n")
+```
+
+This reconstruction also reproduces the item numbering gaps the R scripts
+depend on: CCI skips items 1-2 (starts at item 3), CCA skips item 12 -- both
+match the grading-key item lists already hard-coded in `IJRUME_analysis.R`.
+
+# Generating Qmatrix.xlsx
+
+This chunk writes the workbook `IJRUME_analysis.R`/`.Rmd` actually read, in
+the exact shape they expect: sheets `pca`/`cca`/`cci` (lowercase), an `LO`
+item-label column, a `D` placeholder metadata column for `pca` only (dropped
+by the analysis code, present only because the original script's
+`select(-LO, -D)` expects it), and the skill columns. It's off by default
+(`params$write_qmatrix`) so rendering this document for reading doesn't
+silently overwrite the repo's `Qmatrix.xlsx` -- set `write_qmatrix: true` to
+regenerate it.
+
+```{r write-qmatrix, eval=write_qmatrix}
+readme <- tibble(
+  field = c("Purpose", "Source", "Verification", "Coding origin", "Skills", "Sheet shapes", "Caveat"),
+  value = c(
+    "Reconstructed final Q-matrix for the CCA/CCI/PCA DINA/GDINA models in IJRUME_analysis.R, generated by Qmatrix_documentation.Rmd.",
+    "Derived from Qmatrices/CCD-second coding.xlsx, sheets 'CCA Q', 'CCI Q', 'PCA Q' (fine-grained attributes), collapsed to the 5 broad categories P/L/D/AD/I.",
+    "Item counts per skill (P/L/D/AD/I) reproduce Table IV of Articles/PERC2025_Roberge.pdf exactly -- see Qmatrix_documentation.Rmd for the check.",
+    "Per Roberge_agendas: coded by Kevin Roberge with review from Jayson Nissen; the '5 LO, Qval-updated' version (1 change to CCA, 2 changes to CCI) used for the PERC2025/RUME manuscripts.",
+    "P=Prerequisite skills, L=Limits, D=Derivatives, AD=Applications of Derivatives, I=Integration",
+    "pca: 25 items x [D placeholder, P, L, AD, I]; cca: 17 items x [P, L, D, AD, I]; cci: 22 items x [P, L, D, AD, I].",
+    "Does NOT reflect Kevin Roberge's later attribute-hierarchy work (Nov 2025-Mar 2026) in Qmatrices/Qmatrix.xlsx -- confirm with Kevin/Jayson before using for new analysis."
+  )
+)
+
+make_sheet <- function(q, extra_placeholder = NULL) {
+  items <- as.integer(sub("^item", "", rownames(q)))
+  out <- tibble(LO = paste0("item", items))
+  if (!is.null(extra_placeholder)) out[[extra_placeholder]] <- NA
+  bind_cols(out, q[order(items), , drop = FALSE])
+}
+
+write_xlsx(
+  list(
+    README = readme,
+    pca = make_sheet(q_pca[, c("P","L","AD","I")], extra_placeholder = "D"),
+    cca = make_sheet(q_cca),
+    cci = make_sheet(q_cci)
+  ),
+  path = "Qmatrix.xlsx"
+)
+cat("Wrote Qmatrix.xlsx\n")
+```
+
+# Item key: numbers, skills, and (missing) content
+
+```{r item-key}
+make_key <- function(q, instrument) {
+  tibble(instrument = instrument, item = rownames(q)) %>%
+    bind_cols(select(q, any_of(c("P","L","D","AD","I")))) %>%
+    mutate(
+      skills = pmap_chr(select(., any_of(c("P","L","D","AD","I"))), function(...) {
+        vals <- c(...)
+        paste(names(vals)[vals == 1], collapse = "+")
+      }),
+      item_text = NA_character_
+    )
+}
+item_key <- bind_rows(
+  make_key(q_cca, "CCA"),
+  make_key(q_cci, "CCI"),
+  make_key(q_pca, "PCA")
+) %>% select(instrument, item, skills, item_text)
+
+kable(item_key, caption = "Full item-skill key. item_text is blank everywhere -- see below.")
+```
+
+## What's missing: item text
+
+**No item wording exists anywhere in this repository**, for any of the three
+instruments, confirmed by:
+
+* LASSO's API (`/api/assessments/{year}/regular/export`, the only endpoint
+  this project's code uses) returns item numbers, item-bank codes, response
+  letters, timing, and scores -- never question text. The Postman collection
+  and guide document only this same response-export shape; no separate
+  item-content endpoint is documented anywhere available to us.
+* No codebook file sits alongside `pca_8_23_df.csv` or any LASSO download.
+* `Qmatrices/CCD-second coding.xlsx`'s coding tabs (`Coding-KR`, `Coding-JN`,
+  `2ndCoding Qs`, `CCI Q`/`CCA Q`/`PCA Q`) are binary item-by-LO flag
+  matrices -- item numbers only, never item text.
+
+**Next steps** (see the meeting-agenda memory for full detail):
+
+1. Ask Jayson whether LASSO exposes an item-bank/content export on the
+   admin side, since the response-export API doesn't.
+2. Track down Carlson, Oehrtman & Engelke (2010) for PCA's original item
+   framework and possibly item content.
+3. Resolve PCA's data provenance (see next section) -- whoever originally
+   extracted `pca_8_23_df.csv` may also have item-level documentation.
+
+## PCA's data provenance is still unresolved
+
+`pca_8_23_df.csv` is not fetched by this project's LASSO download pipeline,
+and `download_lasso_data.Rmd` itself flags this as an open question. But its
+metadata (exactly 8 institutions, years 2015-2018) matches
+`Articles/PERC2025_Roberge.pdf`'s stated PCA provenance exactly, so it likely
+*did* originate from LASSO, extracted separately (and earlier) by Kevin
+Roberge or a Purdue collaborator (Yuxiao Zhang, per the agendas), possibly
+under a LASSO assessment code that's since changed, or via an export type
+(`likert`/`adaptive`) this project has never tried. This needs confirmation
+from Jayson, not further guessing from the data alone.
+
+# Open questions (full list)
+
+1. Confirm this reconstruction (matching Table IV exactly, above) is the Q-matrix version to build on for IJRUME -- not the later attribute-hierarchy work in `Qmatrices/Qmatrix.xlsx`.
+2. What does CCA item 12 actually measure? (Unrelated to this Q-matrix -- see `datascript2.Rmd`.)
+3. Should `C1CI`/`C2CI` (Calculus 1/2 Concept Inventory codes on LASSO) be incorporated for more CCI coverage, or are they a different instrument version?
+4. Where can we get PCA's item content, and can Jayson confirm LASSO's original PCA export still exists?
+5. Is LASSO's pre-2025 missing-scores bug fixed yet? (Confirmed still broken as of 2026-07-22.)
+6. Should the CDM (DINA/GDINA) fitting enforce pre/post measurement invariance, like the separate 3PL/IRT section already does?
+7. Does LASSO expose item text anywhere on the admin/instructor side?
+8. Get a copy of Carlson, Oehrtman & Engelke (2010) for PCA's original framework.
