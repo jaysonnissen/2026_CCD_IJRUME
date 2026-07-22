@@ -1,3 +1,49 @@
+#(Mike 7/22/26) LEGACY SCRIPT -- kept as the historical record of the analysis
+#behind:
+#  - Roberge et al., "Calculus Cognitive Diagnostic: Mathematics skills
+#    tested in first semester calculus courses" (PERC 2025;
+#    Articles/PERC2025_Roberge.pdf)
+#  - Roberge et al., "Moving Beyond Total Scores with Skill-Proficiency
+#    Profiles on Concept Inventories" (RUME conference proceedings;
+#    Articles/RUME 2025 CCD-UNMASKED-PRESUBMISSION.pdf)
+#
+#As received, this script could not run to completion: Qmatrix.xlsx was
+#missing from the repo, and the CCA/CCI cognitive-diagnostic section had
+#several bugs that stopped execution before any DINA model was fit. The
+#following were fixed here -- the minimum needed to run and reproduce the
+#conference results, nothing else:
+#  1. Q_pca was read from "../IRT/Qmatrix.xlsx", a path that doesn't exist in
+#     this repo -- changed to "Qmatrix.xlsx".
+#  2. Qmatrix.xlsx itself was missing. It has been reconstructed from
+#     Qmatrices/CCD-second coding.xlsx (the "5LO" Qval-updated coding) and
+#     verified item-for-item against Table IV of the PERC2025 manuscript --
+#     see the README sheet in Qmatrix.xlsx for the derivation.
+#  3. cca_pre/cca_post were bound to single-column score summaries earlier in
+#     this script (for the descriptive-stats section) and were never rebuilt
+#     into item-level response matrices before being handed to GDINA here --
+#     added code to rebuild them from cca_binary.
+#  4. cci_pre_binary/cci_post_binary were referenced but never defined
+#     anywhere in the script -- added code to build them from cci_clean.
+#  5. Typo: personparm(cre_pca_dina, ...) -- fixed to pre_cca_dina.
+#  6. Typo: !pre_missing_idx / !post_missing_idx -- fixed to
+#     !pre_missing_idx_pca / !post_missing_idx_pca.
+#
+#With those fixes, this script's DINA/GDINA fit statistics (RMSEA, SRMSR)
+#reproduce the published Table V values closely for all three instruments.
+#
+#One known bug remains UNFIXED here (see the inline notes near each
+#instrument's Sankey/profile section below): GDINA drops respondents with
+#<=1 valid item response, and this script never re-aligns the shortened
+#output back to the full sample before combining pre/post skill profiles.
+#That silently corrupts PCA's profile labels and crashes CCA/CCI's
+#bind_cols() call, so the Sankey diagrams cannot currently be produced by
+#this script.
+#
+#IJRUME_analysis.Rmd is the corrected, go-forward version for the IJRUME
+#manuscript -- it fixes all of the above, including the remaining Sankey
+#bug. Run this file only when you need to exactly reproduce the PERC2025 /
+#RUME conference-proceedings analysis as originally run.
+
 library(dplyr)
 library(tidyr)
 library(readxl)
@@ -14,6 +60,8 @@ library(magick)
 library(lmerTest)
 library(stringr)
 library(tibble)
+library(VIM)
+
 
 set.seed(1234)
 
@@ -994,7 +1042,7 @@ pre_missing_idx_pca  <- apply(pca_clean_pre,  1, function(x) all(is.na(x)))
 post_missing_idx_pca <- apply(pca_clean_post, 1, function(x) all(is.na(x)))
 
 #load the q-matrix
-Q_pca <- read_excel("../IRT/Qmatrix.xlsx", sheet= "pca")
+Q_pca <- read_excel("Qmatrix.xlsx", sheet= "pca")
 Q_pca <- Q_pca %>% dplyr::select(-LO, -D)
 
 fit_pre_pca  <- GDINA::GDINA(dat = pca_clean_pre,  Q = Q_pca,  model = "GDINA")
@@ -1025,6 +1073,15 @@ post_bin_pca <- ifelse(post_att_pca >= 0.5, 1L, 0L)
 
 att_to_label <- function(v) if (all(is.na(v))) NA_character_ else paste0(v, collapse = "")
 
+#(Mike 7/22/26) There is an error here: GDINA drops respondents with <=1
+#valid item response, so pre_bin_pca/post_bin_pca (and therefore
+#pre_label_pca/post_label_pca below) can be shorter than pca_clean_pre/
+#pca_clean_post. The missingness-index assignments and bind_cols() just
+#below assume matching lengths and silently misalign rather than erroring
+#(unlike the CCA/CCI versions of this bug, which do error). This has been
+#corrected in IJRUME_analysis.Rmd (see make_profile_labels()), which
+#re-aligns GDINA's retained rows back to the full sample before combining
+#pre/post profiles.
 pre_label_pca  <- apply(pre_bin_pca,  1, att_to_label)
 post_label_pca <- apply(post_bin_pca, 1, att_to_label)
 
@@ -1033,8 +1090,8 @@ post_label_pca <- apply(post_bin_pca, 1, att_to_label)
 pre_label_pca[pre_missing_idx_pca]   <- "Missing"
 post_label_pca[post_missing_idx_pca] <- "Missing"
 
-pre_label_pca[is.na(pre_label_pca) & !pre_missing_idx]   <- "Uncertain"
-post_label_pca[is.na(post_label_pca) & !post_missing_idx] <- "Uncertain"
+pre_label_pca[is.na(pre_label_pca) & !pre_missing_idx_pca]   <- "Uncertain"
+post_label_pca[is.na(post_label_pca) & !post_missing_idx_pca] <- "Uncertain"
 
 pca_profiles_sankey <- bind_cols(pre_label_pca, post_label_pca)
 pca_profiles_sankey <- pca_profiles_sankey %>% mutate(
@@ -1099,11 +1156,33 @@ pca_sankey_plot
 Q_cca <- read_excel("Qmatrix.xlsx", sheet= "cca")
 Q_cca <- Q_cca %>% dplyr::select(-LO)
 
+#prep the item-level binary data for GDINA (cca_pre/cca_post were earlier
+#bound to single-column score summaries above; rebuild them here as the
+#q1..q17 response matrices GDINA needs, in the same item order as Q_cca)
+cca_pre <- cca_binary %>% select(starts_with("pre_")) %>% select(-pre_score)
+cca_pre <- cca_pre %>% rename_with(
+                                      ~ str_replace(.x, "^pre_([0-9]{1,2})$", "q\\1"),
+                                      matches("^pre_[0-9]{1,2}$"))
+
+cca_post <- cca_binary %>% select(starts_with("post_")) %>% select(-post_score)
+cca_post <- cca_post %>% rename_with(
+                                      ~ str_replace(.x, "^post_([0-9]{1,2})$", "q\\1"),
+                                      matches("^post_[0-9]{1,2}$"))
+
 #DINA models
 pre_cca_dina <- GDINA(dat = cca_pre, Q = Q_cca, model = "DINA")
 post_cca_dina <- GDINA(dat = cca_post, Q = Q_cca, model = "DINA")
 
-cca_pre_skillprofile <- personparm(cre_pca_dina, what = "MAP")
+#(Mike 7/22/26) There is an error here: GDINA drops respondents with <=1
+#valid item response (independently for pre and post), so
+#cca_pre_skillprofile and cca_post_skillprofile can end up with different
+#row counts. bind_cols() below then throws "Can't recycle ... to match ..."
+#and the script halts -- confirmed when I re-ran this file (1092
+#respondents were dropped from one side but not the other). This has been
+#corrected in IJRUME_analysis.Rmd (see make_profile_labels()), which
+#re-aligns GDINA's retained rows back to the full sample before combining
+#pre/post profiles.
+cca_pre_skillprofile <- personparm(pre_cca_dina, what = "MAP")
 cca_pre_skillprofile <- cca_pre_skillprofile %>% dplyr::select(-multimodes)
 cca_pre_skillprofile$latent_class_pre <- apply(cca_pre_skillprofile, 1, function(row) paste0(row, collapse = ""))
 cca_pre_skillprofile <- cca_pre_skillprofile %>% dplyr::select(-c("A1","A2", "A3", "A4", "A5"))
@@ -1183,10 +1262,30 @@ cca_sankey_plot
 Q_cci <- read_excel("Qmatrix.xlsx", sheet= "cci")
 Q_cci <- Q_cci %>% dplyr::select(-LO)
 
+#prep the item-level binary data for GDINA (cci_pre_binary/cci_post_binary
+#were referenced below but never defined; build them here from cci_clean,
+#in the same item order as Q_cci)
+cci_pre_binary <- cci_clean %>% select(starts_with("pre_")) %>% select(-pre_score)
+cci_pre_binary <- cci_pre_binary %>% rename_with(
+                                      ~ str_replace(.x, "^pre_([0-9]{1,2})$", "q\\1"),
+                                      matches("^pre_[0-9]{1,2}$"))
+
+cci_post_binary <- cci_clean %>% select(starts_with("post_")) %>% select(-post_score)
+cci_post_binary <- cci_post_binary %>% rename_with(
+                                      ~ str_replace(.x, "^post_([0-9]{1,2})$", "q\\1"),
+                                      matches("^post_[0-9]{1,2}$"))
+
 #DINA models
 pre_cci_dina <- GDINA(dat = cci_pre_binary, Q = Q_cci, model = "DINA")
 post_cci_dina <- GDINA(dat = cci_post_binary, Q = Q_cci, model = "DINA")
 
+#(Mike 7/22/26) There is an error here, same as the CCA section above:
+#GDINA drops respondents with <=1 valid item response independently for pre
+#and post, so cci_pre_skillprofile/cci_post_skillprofile can end up with
+#different row counts and bind_cols() below halts the script. This has been
+#corrected in IJRUME_analysis.Rmd (see make_profile_labels()), which
+#re-aligns GDINA's retained rows back to the full sample before combining
+#pre/post profiles.
 cci_pre_skillprofile <- personparm(pre_cci_dina, what = "MAP")
 cci_pre_skillprofile <- cci_pre_skillprofile %>% dplyr::select(-multimodes)
 cci_pre_skillprofile$latent_class_pre <- apply(cci_pre_skillprofile, 1, function(row) paste0(row, collapse = ""))
@@ -1287,5 +1386,3 @@ image_write(combo, "sankeys_side_by_side.png")
 #p_right <- ggdraw() + draw_image("cci_sankey.png")
 #combined <- plot_grid(p_left, p_right, ncol = 2, rel_widths = c(1, 1))
 #ggsave("sankeys_side_by_side.png", combined, width = 12, height = 5.5, dpi = 300)
-
-

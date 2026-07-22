@@ -1,0 +1,884 @@
+---
+title: "CCI, CCA, and PCA Analysis"
+date: "2026-07-17"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  run_models: false
+  run_cdm: false
+  qmatrix_path: "Qmatrix.xlsx"
+  write_outputs: false
+  export_sankey_images: false
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 5
+)
+
+required_packages <- c(
+  "dplyr", "tidyr", "readxl", "ggplot2", "mirt", "GDINA",
+  "networkD3", "patchwork", "htmlwidgets", "webshot2", "magick",
+  "lmerTest", "stringr", "tibble"
+)
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages)) {
+  stop("Install the required packages before rendering: ",
+       paste(missing_packages, collapse = ", "))
+}
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+# `params` is supplied by rmarkdown::render(); this fallback also permits
+# an in-memory knitr syntax check.
+if (!exists("params")) {
+  params <- list(
+    run_models = FALSE,
+    run_cdm = FALSE,
+    qmatrix_path = "Qmatrix.xlsx",
+    write_outputs = FALSE,
+    export_sankey_images = FALSE
+  )
+}
+
+set.seed(1234)
+run_models <- isTRUE(params$run_models)
+run_cdm <- isTRUE(params$run_cdm)
+qmatrix_path <- params$qmatrix_path
+write_outputs <- isTRUE(params$write_outputs)
+export_sankey_images <- isTRUE(params$export_sankey_images)
+```
+
+# Purpose and inputs
+
+This report reproduces the meaningful descriptive, multilevel, item-response,
+and cognitive-diagnostic workflows from `IJRUME_analysis.R` in a documented
+order. `IJRUME_analysis.R` is the legacy script behind the analyses reported
+in:
+
+* Roberge et al., "Calculus Cognitive Diagnostic: Mathematics skills tested
+  in first semester calculus courses" (PERC 2025;
+  `Articles/PERC2025_Roberge.pdf`)
+* Roberge et al., "Moving Beyond Total Scores with Skill-Proficiency Profiles
+  on Concept Inventories" (RUME conference proceedings;
+  `Articles/RUME 2025 CCD-UNMASKED-PRESUBMISSION.pdf`)
+
+This Rmd is the updated, go-forward version being built toward the IJRUME
+manuscript. `IJRUME_analysis.R` itself has also been patched (2026-07-22) to
+the minimum needed to run and reproduce those two manuscripts' fit
+statistics -- see the header comment in that file for the exact list of
+fixes and its one remaining known bug (the Sankey/profile section can still
+crash or silently misalign for respondents GDINA excludes). Everything below
+is the corrected version of that same analysis.
+
+## Corrections relative to `IJRUME_analysis.R`
+
+This Rmd corrects the original script's broken CCA/CCI/PCA cognitive-diagnostic
+objects, inconsistent Q-matrix paths, undefined PCA missingness variables, and
+mislabeling of CCA MAP estimates as EAP. It uses the same item-scoring rules
+for each assessment, validates Q-matrix dimensions and values before fitting,
+and retains respondent-row alignment when GDINA excludes insufficient item
+responses. It also corrects the longitudinal 3PL parameter-table handling,
+labels the course effect size as `d_av`, and reports repeated student-course
+pairs and student/course crossings rather than silently treating them as
+independent observations.
+
+The following CSV files must be in the working directory:
+
+* `cci_data_v12.csv` — CCI student records, scores, and items `pre_3` through
+  `pre_24` and `post_3` through `post_24`;
+* `cca_data_v12.csv` — CCA student records, scores, and items `pre_1` through
+  `pre_18` (without item 12) and their post-test counterparts;
+* `pca_data.csv` — PCA student records, scores, and 25 binary `_C` items for
+  each test occasion.
+
+**Version requirement:** This analysis deliberately reads
+`cci_data_v12.csv` and `cca_data_v12.csv`.  Do **not** silently substitute
+the v13 files produced by `datascript2.R`/`datascript2.Rmd`: the newly
+downloaded raw exports lack historic scores needed by this analysis.  Version
+12 is retained specifically to preserve those historic CCI and CCA scores.
+
+The cognitive-diagnostic/Sankey portion additionally requires
+the workbook named by `qmatrix_path`, with sheets named `pca`, `cca`, and
+`cci`. The default workbook, `Qmatrix.xlsx`, is
+**not present in this project**.  `Qmatrix.csv` is present, but it is a
+single 20-row, 8-attribute matrix and cannot be substituted safely for the
+three worksheet-specific matrices (the analyses require 25, 17, and 22 item
+rows, respectively). Each worksheet must be ordered exactly like the item
+columns described above; GDINA matches Q-matrix rows to item columns by
+position. Thus, the Sankey section is reported as unavailable unless the
+workbook is supplied.
+
+For a quick, non-destructive render, leave all parameters at their defaults.
+Set `run_models: true` to estimate the HLM and IRT models. Set
+`run_cdm: true` to run only the cognitive-diagnostic/Sankey section with the
+selected workbook. Set
+`write_outputs: true` only when the course and item-parameter CSV outputs
+should be written. Sankey image export is separately opt-in because it writes
+HTML and PNG files.
+
+The input summary reports repeated `student_id`/`course_id` pairs but does not
+remove them automatically. They may represent legitimate repeated
+administrations; their treatment requires a documented study decision before
+model fitting.
+
+The Rmd uses GDINA consistently for all three instruments, unlike the original
+script's mixed DINA/GDINA choices. Confirm that this is the intended model
+family before treating resulting profiles as confirmatory. The real
+Q-matrix's item order and content also remain required for substantive results;
+the synthetic example workbook is for software practice only.
+
+```{r load-data}
+cci_data <- read.csv("cci_data_v12.csv", stringsAsFactors = FALSE)
+cca_data <- read.csv("cca_data_v12.csv", stringsAsFactors = FALSE)
+pca_data <- read.csv("pca_data.csv", stringsAsFactors = FALSE)
+
+summarize_repeated_student_course_pairs <- function(data, assessment) {
+  repeated_pairs <- data |>
+    select(student_id, course_id) |>
+    count(student_id, course_id, name = "records") |>
+    filter(records > 1)
+  tibble::tibble(
+    assessment = assessment,
+    input_rows = nrow(data),
+    repeated_student_course_pairs = nrow(repeated_pairs),
+    rows_in_repeated_pairs = sum(repeated_pairs$records)
+  )
+}
+
+input_sizes <- tibble::tibble(
+  assessment = c("CCI", "CCA", "PCA"),
+  students = c(nrow(cci_data), nrow(cca_data), nrow(pca_data)),
+  variables = c(ncol(cci_data), ncol(cca_data), ncol(pca_data))
+)
+input_sizes
+repeated_pair_summary <- bind_rows(
+  summarize_repeated_student_course_pairs(cci_data, "CCI"),
+  summarize_repeated_student_course_pairs(cca_data, "CCA"),
+  summarize_repeated_student_course_pairs(pca_data, "PCA")
+)
+repeated_pair_summary
+```
+
+# Descriptive statistics
+
+## Reusable summaries
+
+The helpers below create consistent score, gain, course-level, and
+demographic summaries without duplicating the same transformations for each
+assessment.
+
+```{r descriptive-helpers}
+make_score_data <- function(data, assessment) {
+  bind_rows(
+    transmute(data, score = pre_score, version = "Pre"),
+    transmute(data, score = post_score, version = "Post")
+  ) |>
+    mutate(assessment = assessment)
+}
+
+summarize_scores <- function(score_data) {
+  score_data |>
+    group_by(assessment, version) |>
+    summarise(
+      mean_score = mean(score, na.rm = TRUE),
+      median_score = median(score, na.rm = TRUE),
+      sd_score = sd(score, na.rm = TRUE),
+      n = sum(!is.na(score)),
+      .groups = "drop"
+    )
+}
+
+summarize_courses <- function(data) {
+  data |>
+    group_by(course_id) |>
+    summarise(
+      mean_pre = mean(pre_score, na.rm = TRUE),
+      mean_post = mean(post_score, na.rm = TRUE),
+      sd_pre = sd(pre_score, na.rm = TRUE),
+      sd_post = sd(post_score, na.rm = TRUE),
+      n_pre = sum(!is.na(pre_score)),
+      n_post = sum(!is.na(post_score)),
+      .groups = "drop"
+    ) |>
+    mutate(
+      gain = round(mean_post - mean_pre, 2),
+      normgain = if_else(
+        mean_pre == 100, NA_real_,
+        round((mean_post - mean_pre) / (100 - mean_pre), 3)
+      ),
+      average_sd = (sd_pre + sd_post) / 2,
+      d_av = if_else(
+        average_sd == 0, NA_real_,
+        round((mean_post - mean_pre) / average_sd, 3)
+      )
+    ) |>
+    select(-average_sd)
+}
+
+summarize_demographics <- function(data, include_instructor = FALSE) {
+  result <- list(
+    courses = count(data, course_id, name = "n"),
+    sex = count(data, male, female, name = "n")
+  )
+  if (include_instructor) {
+    result$instructors <- count(data, instructor, name = "n")
+  }
+  result
+}
+
+write_csv_if_requested <- function(data, path) {
+  if (write_outputs) {
+    write.csv(data, path, row.names = FALSE)
+  }
+  invisible(data)
+}
+```
+
+```{r descriptive-data}
+score_data <- bind_rows(
+  make_score_data(cci_data, "CCI"),
+  make_score_data(cca_data, "CCA"),
+  make_score_data(pca_data, "PCA")
+)
+
+gain_data <- bind_rows(
+  transmute(cci_data, assessment = "CCI", gain = post_score - pre_score),
+  transmute(cca_data, assessment = "CCA", gain = post_score - pre_score),
+  transmute(pca_data, assessment = "PCA", gain = post_score - pre_score)
+)
+
+score_summary <- summarize_scores(score_data)
+score_summary
+
+course_summaries <- list(
+  cci = summarize_courses(cci_data),
+  cca = summarize_courses(cca_data),
+  pca = summarize_courses(pca_data)
+)
+
+demographic_summaries <- list(
+  cci = summarize_demographics(cci_data, include_instructor = TRUE),
+  cca = summarize_demographics(cca_data, include_instructor = TRUE),
+  pca = summarize_demographics(pca_data)
+)
+
+write_csv_if_requested(demographic_summaries$cci$courses, "cci_courses.csv")
+write_csv_if_requested(demographic_summaries$cci$instructors, "cci_inst.csv")
+write_csv_if_requested(demographic_summaries$cca$courses, "cca_courses.csv")
+write_csv_if_requested(demographic_summaries$cca$instructors, "cca_inst.csv")
+write_csv_if_requested(demographic_summaries$pca$courses, "pca_courses.csv")
+write_csv_if_requested(course_summaries$cci, "course_means_cci.csv")
+write_csv_if_requested(course_summaries$cca, "course_means_cca.csv")
+write_csv_if_requested(course_summaries$pca, "course_means_pca.csv")
+```
+
+## Score and gain distributions
+
+```{r descriptive-plots}
+score_density_plots <- lapply(c("CCI", "CCA", "PCA"), function(assessment_name) {
+  ggplot(
+    filter(score_data, .data$assessment == assessment_name),
+    aes(x = score, fill = version)
+  ) +
+    geom_density(na.rm = TRUE, alpha = 0.3, color = "black") +
+    labs(title = paste(assessment_name, "pre- and post-test scores")) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+})
+wrap_plots(score_density_plots, ncol = 3)
+
+ggplot(gain_data, aes(x = gain, fill = assessment)) +
+  geom_density(na.rm = TRUE, alpha = 0.3, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dotted", linewidth = 1) +
+  labs(title = "Pre/post gains by assessment", x = "Post score − pre score") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+```
+
+## Course-level variation
+
+Course-level summaries are retained as data outputs and as distributions of
+the standardized pre/post difference. `d_av` uses the pre/post average
+standard deviation and does not incorporate within-student correlation; it is
+not the paired-samples `d_z`. A missing or zero pooled standard deviation
+yields `NA` rather than an infinite effect size.
+
+```{r course-level-plots}
+course_summaries$cci
+course_summaries$cca
+course_summaries$pca
+
+par(mfrow = c(1, 3))
+for (assessment in c("cci", "cca", "pca")) {
+  hist(
+    course_summaries[[assessment]]$d_av,
+    main = paste(toupper(assessment), "course d_av"),
+    xlab = "d_av"
+  )
+}
+par(mfrow = c(1, 1))
+```
+
+# Multilevel pre/post models
+
+Scores are reshaped to one row per student/test occasion.  The null model
+partitions variance among students, courses, and residual error; the
+fixed-occasion model estimates the average post-test change; and the final
+model allows the pre/post change to vary across courses. This treats student
+and course effects as crossed, so a repeated `student_id` is assumed to
+identify the same student across every associated course.
+
+```{r hlm-helpers}
+make_long_scores <- function(data) {
+  data |>
+    select(student_id, course_id, pre_score, post_score) |>
+    pivot_longer(
+      cols = c(pre_score, post_score),
+      names_to = "version",
+      values_to = "score"
+    ) |>
+    mutate(version = if_else(version == "pre_score", 0, 1)) |>
+    filter(!is.na(score))
+}
+
+calculate_iccs <- function(model) {
+  variance_components <- as.data.frame(VarCorr(model))
+  component_variance <- function(group) {
+    variance_components$vcov[variance_components$grp == group]
+  }
+  total_variance <- sum(
+    component_variance("student_id"),
+    component_variance("course_id"),
+    component_variance("Residual")
+  )
+  tibble::tibble(
+    student_icc = component_variance("student_id") / total_variance,
+    course_icc = component_variance("course_id") / total_variance
+  )
+}
+
+summarize_student_course_crossing <- function(data, assessment) {
+  data |>
+    distinct(student_id, course_id) |>
+    count(student_id, name = "courses_per_student") |>
+    summarise(
+      assessment = assessment,
+      students = n(),
+      students_in_multiple_courses = sum(courses_per_student > 1),
+      .groups = "drop"
+    )
+}
+
+fit_hlm_models <- function(data) {
+  long_data <- make_long_scores(data)
+  null_model <- lmerTest::lmer(
+    score ~ (1 | student_id) + (1 | course_id),
+    data = long_data,
+    REML = TRUE
+  )
+  fixed_change_model <- lmerTest::lmer(
+    score ~ version + (1 | student_id) + (1 | course_id),
+    data = long_data,
+    REML = FALSE
+  )
+  random_change_model <- lmerTest::lmer(
+    score ~ version + (1 | student_id) + (1 + version | course_id),
+    data = long_data,
+    REML = FALSE
+  )
+  list(
+    data = long_data,
+    null_model = null_model,
+    fixed_change_model = fixed_change_model,
+    random_change_model = random_change_model,
+    iccs = calculate_iccs(null_model),
+    comparison = anova(fixed_change_model, random_change_model)
+  )
+}
+```
+
+```{r student-course-diagnostics}
+bind_rows(
+  summarize_student_course_crossing(cci_data, "CCI"),
+  summarize_student_course_crossing(cca_data, "CCA"),
+  summarize_student_course_crossing(pca_data, "PCA")
+)
+```
+
+```{r hlm-models, eval=run_models}
+hlm_results <- list(
+  CCI = fit_hlm_models(cci_data),
+  CCA = fit_hlm_models(cca_data),
+  PCA = fit_hlm_models(pca_data)
+)
+
+lapply(hlm_results, `[[`, "iccs")
+lapply(hlm_results, `[[`, "comparison")
+```
+
+# Item-response theory
+
+## Item scoring and matrices
+
+CCI and CCA responses are lowercased and scored from the answer keys.  A
+student with no score for an occasion has all item responses for that
+occasion set to missing.  PCA already provides binary `_C` item columns.
+This preserves partially observed pre/post records for IRT estimation while
+removing records missing both occasions.
+
+```{r irt-helpers}
+cci_pre_key <- c(
+  pre_3 = "e", pre_4 = "e", pre_5 = "a", pre_6 = "e", pre_7 = "c",
+  pre_8 = "c", pre_9 = "b", pre_10 = "e", pre_11 = "b", pre_12 = "a",
+  pre_13 = "b", pre_14 = "a", pre_15 = "a", pre_16 = "d", pre_17 = "c",
+  pre_18 = "a", pre_19 = "b", pre_20 = "a", pre_21 = "d", pre_22 = "c",
+  pre_23 = "a", pre_24 = "a"
+)
+cci_post_key <- setNames(unname(cci_pre_key), sub("^pre_", "post_", names(cci_pre_key)))
+
+cca_pre_key <- c(
+  pre_1 = "b", pre_2 = "b", pre_3 = "b", pre_4 = "c", pre_5 = "a",
+  pre_6 = "c", pre_7 = "d", pre_8 = "c", pre_9 = "b", pre_10 = "d",
+  pre_11 = "b", pre_13 = "d", pre_14 = "b", pre_15 = "b", pre_16 = "d",
+  pre_17 = "a", pre_18 = "c"
+)
+cca_post_key <- setNames(unname(cca_pre_key), sub("^pre_", "post_", names(cca_pre_key)))
+
+score_items <- function(data, pre_key, post_key) {
+  response_columns <- c(names(pre_key), names(post_key))
+  data |>
+    mutate(across(all_of(response_columns), tolower)) |>
+    mutate(
+      across(
+        all_of(names(pre_key)),
+        ~ as.integer(.x == pre_key[cur_column()])
+      ),
+      across(
+        all_of(names(post_key)),
+        ~ as.integer(.x == post_key[cur_column()])
+      )
+    )
+}
+
+mask_unobserved_occasions <- function(data, pre_items, post_items) {
+  data |>
+    mutate(
+      across(all_of(pre_items), ~ replace(.x, is.na(pre_score), NA)),
+      across(all_of(post_items), ~ replace(.x, is.na(post_score), NA))
+    ) |>
+    filter(!(is.na(pre_score) & is.na(post_score)))
+}
+
+prepare_irt_data <- function(data, pre_items, post_items) {
+  response_data <- data |>
+    select(student_id, all_of(pre_items), all_of(post_items))
+  response_matrix <- response_data |>
+    select(-student_id)
+  response_matrix[] <- lapply(response_matrix, function(x) {
+    x <- as.numeric(x)
+    ifelse(is.na(x), NA_integer_, as.integer(x))
+  })
+  list(
+    ids = response_data$student_id,
+    responses = response_matrix,
+    pre_items = pre_items,
+    post_items = post_items
+  )
+}
+
+make_longitudinal_model <- function(number_of_items) {
+  mirt::mirt.model(paste0(
+    "F1 = 1-", number_of_items, "\n",
+    "F2 = ", number_of_items + 1, "-", 2 * number_of_items, "\n",
+    "COV = F1*F2"
+  ))
+}
+
+cci_pre_items <- names(cci_pre_key)
+cci_post_items <- names(cci_post_key)
+cca_pre_items <- names(cca_pre_key)
+cca_post_items <- names(cca_post_key)
+pca_pre_items <- paste0("pre_", 1:25, "_C")
+pca_post_items <- paste0("post_", 1:25, "_C")
+
+cci_scored <- score_items(cci_data, cci_pre_key, cci_post_key)
+cca_scored <- score_items(cca_data, cca_pre_key, cca_post_key)
+
+cci_clean <- mask_unobserved_occasions(cci_scored, cci_pre_items, cci_post_items)
+cca_clean <- mask_unobserved_occasions(cca_scored, cca_pre_items, cca_post_items)
+pca_clean <- mask_unobserved_occasions(pca_data, pca_pre_items, pca_post_items)
+
+irt_inputs <- list(
+  CCI = prepare_irt_data(cci_clean, cci_pre_items, cci_post_items),
+  CCA = prepare_irt_data(cca_clean, cca_pre_items, cca_post_items),
+  PCA = prepare_irt_data(pca_clean, pca_pre_items, pca_post_items)
+)
+```
+
+## Invariant longitudinal 3PL models
+
+For each assessment, corresponding pre/post items share discrimination,
+difficulty, and guessing parameters. A logit-normal prior with mean `-1.23`
+and standard deviation `0.50` approximates the intended center and spread of
+the former `Beta(5, 17)` guessing prior while using mirt's recommended
+parameterization for a bounded guessing parameter. CCI and PCA use EAP
+ability scores; the original CCA workflow used MAP scores, which is retained
+here and labeled accordingly.
+
+```{r model-helpers}
+find_parameter <- function(values, item, parameter) {
+  which(values$item == item & values$name == parameter)
+}
+
+make_invariance_constraints <- function(values, pre_items, post_items) {
+  unlist(
+    Map(
+      function(pre_item, post_item) {
+        list(
+          c(find_parameter(values, pre_item, "a1"),
+            find_parameter(values, post_item, "a2")),
+          c(find_parameter(values, pre_item, "d"),
+            find_parameter(values, post_item, "d")),
+          c(find_parameter(values, pre_item, "g"),
+            find_parameter(values, post_item, "g"))
+        )
+      },
+      pre_items, post_items
+    ),
+    recursive = FALSE
+  )
+}
+
+apply_guessing_prior <- function(values, item_names) {
+  for (item in item_names) {
+    guessing_row <- find_parameter(values, item, "g")
+    values$prior.type[guessing_row] <- "norm"
+    values$prior_1[guessing_row] <- -1.23
+    values$prior_2[guessing_row] <- 0.50
+  }
+  values
+}
+
+fit_invariant_3pl <- function(irt_input, score_method = "EAP") {
+  number_of_items <- length(irt_input$pre_items)
+  model <- make_longitudinal_model(number_of_items)
+  values <- mirt::mirt(
+    data = irt_input$responses,
+    model = model,
+    itemtype = "3PL",
+    pars = "values"
+  )
+  values <- apply_guessing_prior(
+    values,
+    c(irt_input$pre_items, irt_input$post_items)
+  )
+  fit <- mirt::mirt(
+    data = irt_input$responses,
+    model = model,
+    itemtype = "3PL",
+    pars = values,
+    constrain = make_invariance_constraints(
+      values, irt_input$pre_items, irt_input$post_items
+    ),
+    SE = TRUE,
+    method = "MHRM",
+    technical = list(NCYCLES = 3000)
+  )
+
+  ability <- mirt::fscores(fit, method = score_method)
+  theta <- tibble::tibble(
+    student_id = irt_input$ids,
+    theta_pre = ability[, "F1"],
+    theta_post = ability[, "F2"],
+    d_theta = theta_post - theta_pre
+  )
+  covariance <- coef(fit, simplify = TRUE)$cov
+  model_correlation <- covariance[1, 2] / sqrt(covariance[1, 1] * covariance[2, 2])
+  score_correlation <- cor(
+    theta$theta_pre, theta$theta_post, use = "pairwise.complete.obs"
+  )
+
+  item_parameters <- coef(fit, IRTpars = TRUE, simplify = TRUE)$items |>
+    as.data.frame() |>
+    mutate(
+      a1 = round(as.numeric(a1), 3),
+      b = round(as.numeric(b), 3),
+      g = round(as.numeric(g), 3)
+    )
+
+  pre_observed <- rowSums(!is.na(irt_input$responses[, irt_input$pre_items, drop = FALSE])) > 0
+  post_observed <- rowSums(!is.na(irt_input$responses[, irt_input$post_items, drop = FALSE])) > 0
+
+  list(
+    fit = fit,
+    theta = theta,
+    complete_case_theta = theta[pre_observed & post_observed, , drop = FALSE],
+    model_correlation = model_correlation,
+    score_correlation = score_correlation,
+    score_method = score_method,
+    fit_statistic = mirt::M2(fit),
+    item_parameters = item_parameters
+  )
+}
+
+plot_irt_results <- function(results, assessment) {
+  complete_case_correlation <- cor(
+    results$complete_case_theta$theta_pre,
+    results$complete_case_theta$theta_post,
+    use = "pairwise.complete.obs"
+  )
+  ability_plot <- ggplot(results$theta, aes(theta_pre, theta_post)) +
+    geom_point(alpha = 0.4, size = 1) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+    labs(
+      title = paste(assessment, "(invariant 3PL): pre vs. post ability"),
+      subtitle = paste0(
+        "Model r = ", round(results$model_correlation, 3),
+        " | ", results$score_method, " r = ",
+        round(results$score_correlation, 3)
+      ),
+      x = expression(theta[pre]),
+      y = expression(theta[post])
+    ) +
+    theme_minimal()
+  change_plot <- ggplot(results$theta, aes(d_theta)) +
+    geom_histogram(bins = 30) +
+    geom_vline(xintercept = 0, linetype = "dashed") +
+    labs(
+      title = paste("Change in ability (post − pre):", assessment),
+      subtitle = paste0(
+        results$score_method, " r for students observed at both occasions = ",
+        round(complete_case_correlation, 3)
+      ),
+      x = expression(Delta * theta),
+      y = "Count"
+    ) +
+    theme_minimal()
+  list(ability = ability_plot, change = change_plot)
+}
+
+plot_item_parameters <- function(item_parameters, assessment) {
+  par(mfrow = c(1, 3))
+  for (parameter in c("a1", "b", "g")) {
+    hist(
+      item_parameters[[parameter]],
+      breaks = "FD",
+      col = "gray",
+      main = paste(assessment, parameter),
+      xlab = parameter
+    )
+    abline(v = median(item_parameters[[parameter]], na.rm = TRUE), lty = 2)
+  }
+  par(mfrow = c(1, 1))
+}
+```
+
+```{r irt-models, eval=run_models}
+irt_results <- list(
+  CCI = fit_invariant_3pl(irt_inputs$CCI, score_method = "EAP"),
+  CCA = fit_invariant_3pl(irt_inputs$CCA, score_method = "MAP"),
+  PCA = fit_invariant_3pl(irt_inputs$PCA, score_method = "EAP")
+)
+
+for (assessment in names(irt_results)) {
+  results <- irt_results[[assessment]]
+  print(results$fit_statistic)
+  print(plot_irt_results(results, assessment)$ability)
+  print(plot_irt_results(results, assessment)$change)
+  plot_item_parameters(results$item_parameters, assessment)
+  write_csv_if_requested(
+    results$item_parameters,
+    paste0("cf_", tolower(assessment), ".csv")
+  )
+}
+```
+
+# Cognitive-diagnostic profiles and Sankey diagrams
+
+The original exploratory Sankey code was consolidated into the functions
+below and corrected to use the scored CCI/CCA response matrices.  This
+section is skipped until the required workbook exists; it is also skipped
+when `run_cdm` is false. GDINA requires at least two valid item responses
+for an occasion, so respondents below that threshold are retained in the
+pre/post cohort but labeled `Missing` for that occasion before transitions are
+counted.
+
+```{r sankey-helpers}
+has_qmatrix <- file.exists(qmatrix_path)
+
+prepare_cd_items <- function(data, item_columns, occasion) {
+  data |>
+    select(all_of(item_columns)) |>
+    setNames(sub(paste0("^", occasion, "_([0-9]+).*"), "q\\1", item_columns))
+}
+
+extract_attribute_estimates <- function(fit) {
+  as.matrix(GDINA::personparm(fit, what = "EAP"))
+}
+
+validate_qmatrix <- function(qmatrix, item_count, attribute_count, sheet) {
+  if (nrow(qmatrix) != item_count || ncol(qmatrix) != attribute_count) {
+    stop(
+      "Q-matrix sheet '", sheet, "' must have ", item_count, " rows and ",
+      attribute_count, " attribute columns after metadata columns are removed."
+    )
+  }
+  if (!all(unlist(qmatrix, use.names = FALSE) %in% c(0, 1))) {
+    stop("Q-matrix sheet '", sheet, "' must contain only binary 0/1 entries.")
+  }
+  qmatrix
+}
+
+make_profile_labels <- function(fit, retained_rows, total_rows) {
+  attribute_estimates <- extract_attribute_estimates(fit)
+  if (nrow(attribute_estimates) != length(retained_rows)) {
+    stop(
+      "GDINA returned a different number of profiles than the supplied ",
+      "respondent rows; profiles cannot be aligned safely."
+    )
+  }
+
+  binary_attributes <- ifelse(attribute_estimates >= 0.5, 1L, 0L)
+  profile_labels <- apply(binary_attributes, 1, paste0, collapse = "")
+  profile_labels[apply(is.na(attribute_estimates), 1, any)] <- "Uncertain"
+
+  # GDINA excludes rows with fewer than two valid responses. Restore them to
+  # the original student-row order as missing profiles before pairing pre/post.
+  labels <- rep("Missing", total_rows)
+  labels[retained_rows] <- profile_labels
+  labels
+}
+
+make_sankey <- function(pre_labels, post_labels, minimum_n = 10) {
+  transitions <- tibble(
+    pre_class = paste("Pre:", pre_labels),
+    post_class = paste("Post:", post_labels)
+  ) |>
+    add_count(pre_class, name = "n_pre") |>
+    add_count(post_class, name = "n_post") |>
+    filter(n_pre >= minimum_n, n_post >= minimum_n) |>
+    count(pre_class, post_class, name = "value")
+
+  nodes <- data.frame(
+    name = sort(unique(c(transitions$pre_class, transitions$post_class)))
+  )
+  links <- transitions |>
+    transmute(
+      source = match(pre_class, nodes$name) - 1,
+      target = match(post_class, nodes$name) - 1,
+      value
+    )
+  networkD3::sankeyNetwork(
+    Links = links,
+    Nodes = nodes,
+    Source = "source",
+    Target = "target",
+    Value = "value",
+    NodeID = "name",
+    fontSize = 16,
+    nodeWidth = 30,
+    width = 800
+  )
+}
+
+fit_profile_sankey <- function(clean_data, pre_items, post_items, qmatrix_sheet,
+                               attribute_count,
+                               qmatrix_columns_to_drop = "LO") {
+  qmatrix <- readxl::read_excel(qmatrix_path, sheet = qmatrix_sheet) |>
+    select(-any_of(qmatrix_columns_to_drop)) |>
+    validate_qmatrix(length(pre_items), attribute_count, qmatrix_sheet)
+  pre_data <- prepare_cd_items(clean_data, pre_items, "pre")
+  post_data <- prepare_cd_items(clean_data, post_items, "post")
+
+  # Match GDINA's documented minimum of two valid item responses per person.
+  pre_rows <- which(rowSums(!is.na(pre_data)) >= 2)
+  post_rows <- which(rowSums(!is.na(post_data)) >= 2)
+  if (!length(pre_rows) || !length(post_rows)) {
+    stop("No respondents have enough valid item responses for GDINA.")
+  }
+
+  pre_fit <- GDINA::GDINA(
+    dat = pre_data[pre_rows, , drop = FALSE], Q = qmatrix, model = "GDINA"
+  )
+  post_fit <- GDINA::GDINA(
+    dat = post_data[post_rows, , drop = FALSE], Q = qmatrix, model = "GDINA"
+  )
+  make_sankey(
+    make_profile_labels(pre_fit, pre_rows, nrow(clean_data)),
+    make_profile_labels(post_fit, post_rows, nrow(clean_data))
+  )
+}
+```
+
+```{r sankey-models, eval=run_cdm}
+if (!has_qmatrix) {
+  cat(
+    "`Qmatrix.xlsx` is absent, so the cognitive-diagnostic and Sankey analyses ",
+    "were not run.  See the input requirements above.\n",
+    sep = ""
+  )
+} else {
+  sankey_plots <- list(
+    PCA = fit_profile_sankey(
+      pca_clean, pca_pre_items, pca_post_items, "pca",
+      attribute_count = 4,
+      qmatrix_columns_to_drop = c("LO", "D")
+    ),
+    CCA = fit_profile_sankey(
+      cca_clean, cca_pre_items, cca_post_items, "cca",
+      attribute_count = 5
+    ),
+    CCI = fit_profile_sankey(
+      cci_clean, cci_pre_items, cci_post_items, "cci",
+      attribute_count = 5
+    )
+  )
+  sankey_plots
+}
+```
+
+## Optional Sankey image export
+
+This export mirrors the original PCA/CCI side-by-side image workflow.  It is
+not run by default because it writes `pca_sankey.html`, `cci_sankey.html`,
+their PNG screenshots, and `sankeys_side_by_side.png`.
+
+```{r export-sankey-images, eval=run_cdm && export_sankey_images}
+stopifnot(exists("sankey_plots"))
+
+htmlwidgets::saveWidget(sankey_plots$PCA, "pca_sankey.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(sankey_plots$CCI, "cci_sankey.html", selfcontained = TRUE)
+webshot2::webshot("pca_sankey.html", file = "pca_sankey.png",
+                  vwidth = 900, vheight = 600, zoom = 2)
+webshot2::webshot("cci_sankey.html", file = "cci_sankey.png",
+                  vwidth = 900, vheight = 600, zoom = 2)
+
+pca_image <- magick::image_read("pca_sankey.png") |> magick::image_trim()
+cci_image <- magick::image_read("cci_sankey.png") |> magick::image_trim()
+target_height <- max(
+  magick::image_info(pca_image)$height,
+  magick::image_info(cci_image)$height
+)
+pca_image <- magick::image_extent(
+  pca_image,
+  geometry = paste0(magick::image_info(pca_image)$width, "x", target_height),
+  gravity = "center"
+)
+cci_image <- magick::image_extent(
+  cci_image,
+  geometry = paste0(magick::image_info(cci_image)$width, "x", target_height),
+  gravity = "center"
+)
+spacer <- magick::image_blank(width = 100, height = target_height, color = "white")
+magick::image_append(c(pca_image, spacer, cci_image), stack = FALSE) |>
+  magick::image_write("sankeys_side_by_side.png")
+```
