@@ -50,10 +50,16 @@ by path (the two project manuscripts, plus Carlson (2010) and Epstein
 (2013)). That folder is **intentionally not part of this public GitHub
 repo** -- it's local reference material only, since it mixes the project's
 own manuscripts with copyrighted third-party journal articles and other
-material not appropriate to redistribute publicly. `Qmatrices/` (the
-Q-matrix source coding workbooks) *is* pushed, since this document's
-[Reconstructing the 5-skill Q-matrix] chunk reads from it directly and needs
-it to actually run for anyone who clones the repo.
+material not appropriate to redistribute publicly.
+
+**A note on repo layout:** to keep the repo minimal, only one Q-matrix
+source file is tracked: `CCD-second coding.xlsx` (root), which this
+document's [Reconstructing the 5-skill Q-matrix] chunk reads directly to
+regenerate `Qmatrix.xlsx`. Older/intermediate coding files that are useful
+context but not needed to run the analysis (an earlier 39-fine-attribute
+coding stage, an old manual LASSO export, an orphaned plotting script) live
+in `unused_files/` instead of being deleted outright, since they're
+referenced by name in the history below.
 
 **What this document is not:** it does not contain the actual item wording.
 See [What's missing: item text] for why, and what to do about it.
@@ -63,7 +69,7 @@ See [What's missing: item text] for why, and what to do about it.
 This chronology is reconstructed from two sources: the `Roberge_agendas/`
 meeting-notes documents (Kevin Roberge's and Jayson Nissen's dated working
 notes, Jan 2025 -- Mar 2026) and the tab structure of
-`Qmatrices/CCD-second coding.xlsx` itself, which preserves several coding
+`CCD-second coding.xlsx` itself, which preserves several coding
 iterations side by side.
 
 | When | What happened |
@@ -73,13 +79,13 @@ iterations side by side.
 | **Feb 12, 2025** | Builds a much more granular OpenStax-based codebook: ~162 LOs at a fine level, ~36 at a coarser section level; adds P6 (Algebra Basics) and E1 (Interpretation); codes CCI/CaCI/CCA/PCA/C2CI producing 98 item-codes. This is the 27-LO taxonomy reproduced in full below. |
 | **Feb 26, 2025** | Literature review pass: Carlson (2010, PCA), Epstein (2013, CCI), Gleason et al. (2015), Carlson et al. (2015). Explores running PCA's DINA model using Carlson's *own* original LOs, not the recoded P/L/D/AD/I scheme. |
 | **Mar 7--21, 2025** | Jayson and Kevin add P7 (graphical fluency); build a Q-matrix tab; do an item-by-item KEEP/REMOVE pass on sparsely-coded LOs for CCI and CCA. |
-| **Apr 17--25, 2025** | "Codebook is finished" at ~37 fine-grained LOs (P1--P7, L1--L5, D1--D9, AD1--AD10, I1--I7, E1) -- this is what's preserved in `Qmatrices/Qmatrix.xlsx`'s `CCI`/`CCA`/`PCA` tabs. The **`CCD-second coding.xlsx`** workbook is created around this point, with a `2ndCoding Qs` tab holding "actual Q-matrices and suggested revisions" and a Qval-based fit-improvement pass (Qval is a DINA-model diagnostic that flags items whose empirical response pattern doesn't match their assigned Q-matrix row). |
+| **Apr 17--25, 2025** | "Codebook is finished" at ~37 fine-grained LOs (P1--P7, L1--L5, D1--D9, AD1--AD10, I1--I7, E1) -- this is what's preserved in `unused_files/Qmatrix_intermediate_coding_stage.xlsx`'s `CCI`/`CCA`/`PCA` tabs. The **`CCD-second coding.xlsx`** workbook is created around this point, with a `2ndCoding Qs` tab holding "actual Q-matrices and suggested revisions" and a Qval-based fit-improvement pass (Qval is a DINA-model diagnostic that flags items whose empirical response pattern doesn't match their assigned Q-matrix row). |
 | **May 7, 2025** | Explicit statement of the operative scheme: **"For the CCD we are using five Learning Objectives: P: Prerequisite knowledge, L: Limits, D: Derivatives, AD: Applications of Derivatives, I: Introduction to Integration."** Fit statistics compared across a "full Q-matrix," a "5 LO Q-matrix," and a "5 LO Q-matrix, UPDATED from Qval" (1 change to CCA, 2 changes to CCI) -- this last one is the version reconstructed in this document. |
 | **May 21--29, 2025** | "I think what we've done for the PERC paper is fine but I would like to pursue the attribute hierarchies this summer." DINA re-run on a corrected CCA subset; "I have also updated the numbers in the PERC manuscript." |
 | **Jun 4, 2025** | PERC2025 paper submitted. |
 | **Jun 15--18, 2025** | "CCD on LASSO Update... All IRT, DINA (Guess/Slip) and Q updated." Creates a GitHub repo for the project ("Calc Repo") and shares it with Jayson -- this is the likely origin of the code now in *this* repository. Upload checklist includes `Qmatrix.xlsx` (the 5-LO, Qval-updated version) alongside `Calc_IRT.R`, `calc_data_prep.R`, `Cacl_DINA.R`. |
 | **Sep 2025 -- Feb 2026** | Separate RUME conference-proceedings cycle (a second, later RUME submission "recycling" PERC content with updates); accepted ~Oct 31, 2025; presented Feb 26--28, 2026. |
-| **Nov 2025 -- Mar 2026** | Kevin's work shifts to **attribute hierarchies** (e.g., testing whether skills form a strict order P > L > D > AD > I) for the IJRUME journal manuscript and a separate "Skill Hierarchies" paper -- both with their own GitHub repos, distinct from the "Calc Repo." This later work is why `Qmatrices/Qmatrix.xlsx` (39 fine attributes, `CCI_partial`/`CCA_partial`, `PCA_Carlson` variants) looks more evolved than what the conference papers report: **it reflects this later phase, not the 5-LO version the papers actually used.** |
+| **Nov 2025 -- Mar 2026** | Kevin's work shifts to **attribute hierarchies** (e.g., testing whether skills form a strict order P > L > D > AD > I) for the IJRUME journal manuscript and a separate "Skill Hierarchies" paper -- both with their own GitHub repos, distinct from the "Calc Repo." This later work is why `unused_files/Qmatrix_intermediate_coding_stage.xlsx` (39 fine attributes, `CCI_partial`/`CCA_partial`, `PCA_Carlson` variants) looks more evolved than what the conference papers report: **it reflects this later phase, not the 5-LO version the papers actually used.** |
 
 The upshot: there were at least three distinct Q-matrix eras -- (1) an initial
 rough coding used for the RUME 2025 submission, (2) the refined, Qval-updated
@@ -90,7 +96,7 @@ and Skill Hierarchies papers.
 # The 27-LO taxonomy behind the 5 broad skills
 
 Before narrowing to P/L/D/AD/I, Kevin built out this fuller taxonomy (from
-`Qmatrices/CCD-second coding.xlsx`, tab `Revised LOs`). Every fine-grained
+`CCD-second coding.xlsx`, tab `Revised LOs`). Every fine-grained
 code below rolls up into exactly one of the five broad skills used in the
 final Q-matrix.
 
@@ -191,7 +197,7 @@ framework, now in `Articles/`:
 > assessment: A tool for assessing students' reasoning abilities and
 > understandings. *Cognition and Instruction*, 28(2), 113-145.
 
-`Qmatrices/Qmatrix.xlsx`'s `PCA_Carlson` tab preserves Kevin's coding of all
+`unused_files/Qmatrix_intermediate_coding_stage.xlsx`'s `PCA_Carlson` tab preserves Kevin's coding of all
 25 PCA items against Carlson's own 15 sub-construct codes before they were
 recoded into P/L/D/AD/I. Those codes are now defined, straight from the
 paper's Table 2 ("The PCA Taxonomy"), along with the exact PCA items each
@@ -307,19 +313,27 @@ but it does explain CCI's origin and validates our item count:
 
 # Where the Q-matrix data lives, and why most candidates are wrong
 
-Several files in this repo could plausibly be "the Q-matrix." Only one is:
+Several files could plausibly be "the Q-matrix," which was the original
+source of confusion this document exists to resolve. Only one is:
 
 | File | What it actually is |
 |---|---|
-| `Qmatrix.csv` (repo root) | **Not project data.** 20 items x 8 generic attributes named "Item01"/"A1" -- matches the classic Tatsuoka fraction-subtraction dataset bundled as a tutorial example with CDM packages, unrelated to this project. |
-| `Qmatrices/Qmatrix.xlsx` (= `Copy_Qmatrix.xlsx`) | An **intermediate coding stage**: the ~37-code fine-grained taxonomy (P1-P7, L1-L5, D1-D9, AD1-AD10, I1-I7, E1) from Kevin's later (Nov 2025+) attribute-hierarchy work, plus the Carlson-framework tabs. Sheet names are uppercase (`CCI`/`CCA`/`PCA`), which doesn't even match what `IJRUME_analysis.R` expects (`sheet = "cci"` etc., case-sensitive). |
-| `Qmatrices/CCD-second coding.xlsx` | **The source of truth used here.** Sheets `CCI Q`, `CCA Q`, `PCA Q` hold the final, Qval-updated fine-grained coding (11/11/9 attributes respectively) that collapses to the 5-skill scheme used in the papers. |
-| `Qmatrix.xlsx` (repo root) | The reconstructed final Q-matrix, **generated by this document** -- see below. |
+| `Qmatrix.xlsx` (repo root) | **The Q-matrix `IJRUME_analysis.R`/`.Rmd` actually read.** The reconstructed final Q-matrix, **generated by this document** -- see below. |
+| `CCD-second coding.xlsx` (repo root) | **The source of truth this reconstruction is derived from.** Sheets `CCI Q`, `CCA Q`, `PCA Q` hold the final, Qval-updated fine-grained coding (11/11/9 attributes respectively) that collapses to the 5-skill scheme used in the papers. |
+| `unused_files/Qmatrix_intermediate_coding_stage.xlsx` | An **older, intermediate coding stage**, not read by any analysis script: the ~37-code fine-grained taxonomy (P1-P7, L1-L5, D1-D9, AD1-AD10, I1-I7, E1) from Kevin's later (Nov 2025+) attribute-hierarchy work, plus the Carlson-framework tabs. Sheet names are uppercase (`CCI`/`CCA`/`PCA`), which doesn't even match what `IJRUME_analysis.R` expects (`sheet = "cci"` etc., case-sensitive). Kept for historical reference, not deleted, since it's discussed throughout this document's [History: how we got to a 5-skill Q-matrix] section. |
+
+Two other files were in earlier versions of this repo and have since been
+removed entirely (not just moved) because they were neither used by any
+script nor useful context: a root-level `Qmatrix.csv` (20 items x 8 generic
+attributes named "Item01"/"A1" -- the classic Tatsuoka fraction-subtraction
+dataset bundled as a tutorial example with CDM packages, unrelated to this
+project), and `Copy_Qmatrix.xlsx` (a byte-for-byte duplicate of the
+intermediate coding stage above).
 
 # Reconstructing the 5-skill Q-matrix
 
 ```{r load-source}
-source_path <- "Qmatrices/CCD-second coding.xlsx"
+source_path <- "CCD-second coding.xlsx"
 stopifnot(file.exists(source_path))
 
 read_fine_qmatrix <- function(sheet) {
@@ -455,12 +469,12 @@ readme <- tibble(
   field = c("Purpose", "Source", "Verification", "Coding origin", "Skills", "Sheet shapes", "Caveat"),
   value = c(
     "Reconstructed final Q-matrix for the CCA/CCI/PCA DINA/GDINA models in IJRUME_analysis.R, generated by Qmatrix_documentation.Rmd.",
-    "Derived from Qmatrices/CCD-second coding.xlsx, sheets 'CCA Q', 'CCI Q', 'PCA Q' (fine-grained attributes), collapsed to the 5 broad categories P/L/D/AD/I.",
+    "Derived from CCD-second coding.xlsx, sheets 'CCA Q', 'CCI Q', 'PCA Q' (fine-grained attributes), collapsed to the 5 broad categories P/L/D/AD/I.",
     "Item counts per skill (P/L/D/AD/I) reproduce Table IV of Articles/PERC2025_Roberge.pdf exactly -- see Qmatrix_documentation.Rmd for the check.",
     "Per Roberge_agendas: coded by Kevin Roberge with review from Jayson Nissen; the '5 LO, Qval-updated' version (1 change to CCA, 2 changes to CCI) used for the PERC2025/RUME manuscripts.",
     "P=Prerequisite skills, L=Limits, D=Derivatives, AD=Applications of Derivatives, I=Integration",
     "pca: 25 items x [D placeholder, P, L, AD, I]; cca: 17 items x [P, L, D, AD, I]; cci: 22 items x [P, L, D, AD, I].",
-    "Does NOT reflect Kevin Roberge's later attribute-hierarchy work (Nov 2025-Mar 2026) in Qmatrices/Qmatrix.xlsx -- confirm with Kevin/Jayson before using for new analysis."
+    "Does NOT reflect Kevin Roberge's later attribute-hierarchy work (Nov 2025-Mar 2026) in unused_files/Qmatrix_intermediate_coding_stage.xlsx -- confirm with Kevin/Jayson before using for new analysis."
   )
 )
 
@@ -520,7 +534,7 @@ caveat above). Confirmed by:
   and guide document only this same response-export shape; no separate
   item-content endpoint is documented anywhere available to us.
 * No codebook file sits alongside `pca_8_23_df.csv` or any LASSO download.
-* `Qmatrices/CCD-second coding.xlsx`'s coding tabs (`Coding-KR`, `Coding-JN`,
+* `CCD-second coding.xlsx`'s coding tabs (`Coding-KR`, `Coding-JN`,
   `2ndCoding Qs`, `CCI Q`/`CCA Q`/`PCA Q`) are binary item-by-LO flag
   matrices -- item numbers only, never item text.
 * Epstein (2013), CCI's validation paper, has no item-level content either
@@ -558,7 +572,7 @@ from Jayson, not further guessing from the data alone.
 
 # Open questions (full list)
 
-1. Confirm this reconstruction (matching Table IV exactly, above) is the Q-matrix version to build on for IJRUME -- not the later attribute-hierarchy work in `Qmatrices/Qmatrix.xlsx`.
+1. Confirm this reconstruction (matching Table IV exactly, above) is the Q-matrix version to build on for IJRUME -- not the later attribute-hierarchy work in `unused_files/Qmatrix_intermediate_coding_stage.xlsx`.
 2. What does CCA item 12 actually measure? (Unrelated to this Q-matrix -- see `datascript2.Rmd`.)
 3. Should `C1CI`/`C2CI` (Calculus 1/2 Concept Inventory codes on LASSO) be incorporated for more CCI coverage, or are they a different instrument version?
 4. Where can we get the rest of PCA's/CCI's/CCA's item content, and can Jayson confirm LASSO's original PCA export still exists?
