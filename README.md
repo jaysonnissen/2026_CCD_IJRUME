@@ -96,6 +96,61 @@ resulting table against the published values side by side. It's a
 separate, self-contained document -- distinct from both the frozen `.R`
 script and the go-forward `.Rmd` files, which don't do any year-filtering.
 
+### How close does it get? (as of 2026-07-24)
+
+| Table | Match? | What differs |
+|---|---|---|
+| PERC Table I (descriptive stats) | Partial | All 3 instruments' means run high vs. published (CCA +5.6, CCI +0.7, PCA +0.8 before the fix below). N is off in both directions -- CCA/CCI *below* published, PCA *above*. |
+| Institution/course/instructor counts | No | CCA 6 vs 7 institutions (25 vs 42 courses, 10 vs 12 instructors). CCI 4 vs 5 (97 vs 123, 9 vs 10). PCA 7 vs 8 institutions -- identified and explained, see below. |
+| PERC Table IV (item distribution) | **Exact** | Matches to the item, all 3 instruments, all 5 skills. |
+| PERC Table V (RMSEA/SRMSR) | Very close | All values within 0.001-0.004 of published, for all 3 instruments -- essentially reproduces despite the N mismatch. |
+| PERC Table VI (classification accuracy) | CCA exact, CCI near-exact, PCA off | CCA: all 5 skills match exactly (0.90/0.90/0.88/0.78/0.87). CCI: 4 of 5 exact, only Integration differs (0.97 vs 0.98). PCA is the outlier: Limits is off by 0.19 (0.87 vs. published 0.68) -- the single biggest gap in the whole comparison. |
+| RUME Table 1 | Same as PERC's | Directly reuses PERC's PCA/CCI Table IV/VI results -- no separate computation. |
+| RUME Table 2 (HLM) | Close, one metric off | Coefficients and effect direction match well for both PCA and CCI; `df` runs higher than published in both (more matched pairs in our data than the paper used). |
+| RUME matched-pairs effect sizes | **Essentially exact** | PCA d=0.09 vs. published 0.09 (exact). CCI d=0.27 vs. published 0.26. N is off (PCA +172, CCI -30) but the substantive finding reproduces almost perfectly. |
+| RUME Sankey -- CCI | Right direction, smaller effect | "00000" (no-proficiency) group shrinks in both, similar magnitude. |
+| RUME Sankey -- PCA | **Wrong direction** | The "0000" group *grows* in our reproduction; the paper reports it shrinking 51%. This is a substantive disagreement, not just a sample-size issue -- see the measurement-invariance item below. |
+
+### The PCA fix that gets Table I almost exact: deduplicate repeat students
+
+PERC2025's methods state: *"In cases where students completed the same
+assessment multiple times, we only used their first response to the most
+recent post test."* That rule isn't currently applied anywhere in the
+pipeline. `pca_8_23_df.csv` has 255 students with repeat entries (different
+courses/terms) in the eligible population. Applying the paper's own rule
+(keep each student's most-recent record, preferring one with a post-score)
+plus excluding the handful of Learning Assistant/Faculty rows LASSO
+includes in the raw file:
+
+| | n | mean | median | sd |
+|---|---|---|---|---|
+| Current (year-filtered only) | 1476 | 45.1 | 44.0 | 17.8 |
+| + deduplicated to one record/student | 1279 | 44.6 | 44.0 | 17.6 |
+| Published | 1260 | 44.3 | 42.3 | 17.7 |
+
+That closes the N gap from 216 down to 19, with mean/SD landing almost
+exactly on the published values. Not yet implemented in
+`PERC_RUME_Reproduction.Rmd` -- this was confirmed as a promising fix but
+still needs to be coded in.
+
+**This doesn't generalize to CCA/CCI.** Both have repeat-student records
+too, but their post-only N is already at or below published, so
+deduplicating would only pull them further away. Their institution-count
+gap looks like genuinely missing coverage rather than duplicate inflation,
+and it can't be diagnosed the same way PCA's was (see below) -- `v12`'s
+institution IDs for CCA/CCI don't map to the raw LASSO export's IDs in any
+way currently available in this repo.
+
+**PCA's missing 8th institution, found:** `institution_id` 318 is present
+in the raw `pca_8_23_df.csv` (8 institutions total, matching PERC exactly)
+but absent from the processed `pca_data.csv` -- it has exactly 6 student
+records, all in one course (Spring 2017), dropped by `datascript2.R`'s
+"≥10 students per course" rule (a rule neither paper's methods section
+actually mentions). This explains the institution *count* gap, but not the
+N gap: all 6 of those students have a pretest score but zero have a
+posttest score, so they wouldn't count toward PERC's post-only n=1260
+regardless of the course-size rule.
+
 ## The Q-matrix
 
 **Start with `Qmatrix_documentation.Rmd`** if you need to understand or
