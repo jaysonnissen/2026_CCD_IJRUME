@@ -59,6 +59,23 @@ Model fitting (DINA/GDINA/HLM) is slow, so it's gated behind
 descriptive-stats and filtering sections below run regardless and are fast.
 Set both to `TRUE` for a full run -- expect it to take a while.
 
+**PCA deduplication fix, implemented (2026-07-24).** Year-filtering alone
+leaves PCA's Table I sample size well above published (n=1476 vs. 1260).
+PERC2025's methods state a rule that isn't reflected anywhere in the
+pipeline as received: *"In cases where students completed the same
+assessment multiple times, we only used their first response to the most
+recent post test."* Applying it (see `pca-dedup-helpers` below) closes
+almost all of that gap -- n=1264 vs. published 1260 -- and improves fit
+downstream: Table V's PCA RMSEA lands on an exact match (0.034), Table VI's
+Applications-of-Derivatives classification accuracy becomes exact (0.87),
+and RUME's PCA matched-pairs effect size matches exactly (d=0.09 vs. 0.09,
+n=894 vs. published 897). It even flips the Sankey "0000" group's
+pretest-to-posttest direction from wrong (growing) to right (shrinking),
+though the published magnitude (-51%) is still far off. This fix does
+**not** generalize to CCA/CCI -- checked directly, both already have a
+post-only N at or below published, so deduplicating would pull them
+further away, not closer.
+
 ## Why we think filtering will work
 
 **The postman file isn't usable as a primary source, but it explains the
@@ -120,6 +137,53 @@ pca_data <- read.csv("pca_data.csv", stringsAsFactors = FALSE)
 filter_by_year <- function(data, years) {
   filter(data, year %in% years)
 }
+```
+
+PCA-specific fix (2026-07-24): PERC2025's methods state *"In cases where
+students completed the same assessment multiple times, we only used their
+first response to the most recent post test."* That rule isn't reflected
+in `pca_data.csv` as received -- 255 students have repeat entries (different
+courses/terms) within PERC's year window. Applying it (keep each student's
+most-recent record, preferring one with a post-score present) closes most
+of PCA's Table I sample-size gap; see the comparison in "PERC2025 Table I"
+below. This does **not** generalize to CCA/CCI -- both already have a
+post-only N at or below published, so deduplicating would pull them
+further away, not closer (checked directly; not applied to them here).
+
+```{r pca-dedup-helpers}
+# `pca_8_23_df.csv` (the raw PCA source `pca_data.csv` is filtered from)
+# flags a small number of non-student rows (Learning Assistants, Faculty,
+# TAs) that PERC's "student" population presumably excludes; datascript2.R
+# doesn't currently filter on this. pca_data.csv itself doesn't carry the
+# student_or_la column, so pull just the student_id exclusion list from the
+# raw file rather than switching PCA's whole data source for this document.
+pca_non_student_ids <- read.csv("pca_8_23_df.csv", stringsAsFactors = FALSE) |>
+  filter(student_or_la != "Student") |>
+  pull(student_id) |>
+  unique()
+
+dedup_to_latest_per_student <- function(data) {
+  term_rank <- c(Spring = 1, Summer = 2, Fall = 3)
+  data |>
+    mutate(.has_post = !is.na(post_score), .term_rank = term_rank[term]) |>
+    arrange(student_id, .has_post, year, .term_rank) |>
+    group_by(student_id) |>
+    slice_tail(n = 1) |>
+    ungroup() |>
+    select(-.has_post, -.term_rank)
+}
+
+pca_data_perc_deduped <- pca_data |>
+  filter_by_year(2015:2018) |>
+  filter(!student_id %in% pca_non_student_ids) |>
+  dedup_to_latest_per_student()
+
+# Same fix, RUME's narrower year window -- confirmed to work equally well
+# there (matched-pairs n=902 vs. published 897, d_av exact match at 0.09).
+pca_data_rume_deduped <- pca_data |>
+  filter_by_year(2016:2018) |>
+  filter(!student_id %in% pca_non_student_ids) |>
+  dedup_to_latest_per_student()
 ```
 
 ```{r scoring-helpers}
@@ -210,6 +274,11 @@ filtered_table_i <- bind_rows(
   summarize_post_only(filter_by_year(pca_data, 2015:2018), "PCA")
 )
 
+# PCA only -- see pca-dedup-helpers above. Deduplication doesn't help
+# CCA/CCI (checked directly; their post-only N is already at or below
+# published), so no equivalent row exists for them.
+pca_deduped_table_i <- summarize_post_only(pca_data_perc_deduped, "PCA")
+
 published_table_i <- tribble(
   ~assessment, ~n,    ~mean, ~median, ~sd,
   "CCA",       1463,  37.7,  33.3,    17.5,
@@ -220,6 +289,7 @@ published_table_i <- tribble(
 comparison_table_i <- bind_rows(
   mutate(unfiltered_table_i, source = "Unfiltered (current v12)"),
   mutate(filtered_table_i, source = "Year-filtered"),
+  mutate(pca_deduped_table_i, source = "Year-filtered + deduplicated (PCA only)"),
   mutate(published_table_i, source = "Published")
 ) |> arrange(assessment, source)
 
@@ -259,6 +329,14 @@ kable(
     "Institution/course/instructor counts, year-filtered vs. published."
   )
 )
+
+# PCA only, post-deduplication -- for comparison against the row above.
+pca_deduped_post <- pca_data_perc_deduped |> filter(!is.na(post_score))
+tibble(
+  n_institutions = n_distinct(pca_deduped_post$institution_id),
+  n_courses = n_distinct(pca_deduped_post$course_id)
+) |>
+  kable(caption = "PCA institution/course counts after year-filtering + deduplication (published: 8 institutions, 40 courses)")
 ```
 
 **PCA's missing 8th institution, identified (2026-07-24):** `institution_id`
@@ -357,7 +435,9 @@ fit_postonly_model <- function(data, items, qmatrix, model_type) {
 
 cca_perc_post <- filter_by_year(cca_scored, 2019:2023) |> filter(!is.na(post_score))
 cci_perc_post <- filter_by_year(cci_scored, 2021:2024) |> filter(!is.na(post_score))
-pca_perc_post <- filter_by_year(pca_data, 2015:2018) |> filter(!is.na(post_score))
+# PCA uses the deduplicated population (see pca-dedup-helpers) -- CCA/CCI
+# don't get an equivalent treatment; deduplication doesn't help them.
+pca_perc_post <- pca_data_perc_deduped |> filter(!is.na(post_score))
 
 fit_cca_perc <- fit_postonly_model(cca_perc_post, cca_post_items, q_cca, "DINA")
 fit_cci_perc <- fit_postonly_model(cci_perc_post, cci_post_items, q_cci, "DINA")
@@ -466,7 +546,8 @@ fit_rume_hlm <- function(data) {
 
 ```{r rume-hlm-fit, eval=run_rume}
 cci_rume <- filter_by_year(cci_scored, 2021:2024)
-pca_rume <- filter_by_year(pca_data, 2016:2018)
+# Deduplicated, per the same fix applied to PERC's PCA population above.
+pca_rume <- pca_data_rume_deduped
 
 hlm_cci <- fit_rume_hlm(cci_rume)
 hlm_pca <- fit_rume_hlm(pca_rume)
@@ -546,6 +627,17 @@ rume_window_accounting <- bind_rows(
 )
 kable(rume_unfiltered, caption = "Unfiltered matched-pairs descriptives")
 kable(rume_window_accounting, caption = "Year-filtered institution/course/instructor counts (RUME window)")
+
+# PCA only, post-deduplication (see pca-dedup-helpers).
+kable(
+  summarize_matched_pairs(pca_data_rume_deduped, "PCA"),
+  caption = "PCA matched-pairs descriptives after deduplication (published: n=897, pre 44.4/17.1, post 46.0/17.3, d=0.09)"
+)
+tibble(
+  n_institutions = n_distinct(pca_data_rume_deduped$institution_id),
+  n_courses = n_distinct(pca_data_rume_deduped$course_id)
+) |>
+  kable(caption = "PCA institution/course counts after deduplication (published: 6 institutions, 33 courses)")
 ```
 
 ## Sankey diagram reproduction (Figure 2)
