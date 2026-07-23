@@ -256,13 +256,25 @@ kable(
   left_join(perc_window_accounting, published_accounting, by = "assessment",
             suffix = c("_ours", "_published")),
   caption = paste(
-    "Institution/course/instructor counts, year-filtered vs. published.",
-    "PCA's institution count (7 vs. published 8) doesn't close via year",
-    "filtering alone -- an institution's worth of data appears to be",
-    "absent from the local file, not just out-of-window; still unresolved."
+    "Institution/course/instructor counts, year-filtered vs. published."
   )
 )
 ```
+
+**PCA's missing 8th institution, identified (2026-07-24):** `institution_id`
+318 exists in the raw `pca_8_23_df.csv` (8 institutions total, matching
+PERC's stated count exactly) but not in the processed `pca_data.csv` (7
+institutions) that this document and `IJRUME_analysis.R`/`.Rmd` read.
+Institution 318 has exactly 6 student records, all in a single course
+(`course_id` 592, Spring 2017) -- dropped entirely by `datascript2.R`'s
+"at least 10 students per course" minimum-course-size rule, since that's
+the institution's only course. **This doesn't explain any of PCA's sample-
+size gap, though**: all 6 of those students have a valid pretest score but
+zero have a posttest score, so none of them would count toward PERC's
+post-only Table I population (n=1260) even if the course-size rule didn't
+drop them. It only explains the institution *count* discrepancy in
+isolation -- the actual N gap (published 1260 vs. our ~1476 post-only) has
+a separate, still-unresolved cause.
 
 ## Table IV: item distribution by skill
 

@@ -6,13 +6,26 @@ Inventory), and **PCA** (Precalculus Concept Assessment) -- scored against five
 broad skills: Prerequisites, Limits, Derivatives, Applications of Derivatives,
 and Integration.
 
-This project originated with Kevin Roberge, Jayson Nissen,  and was reported
-in two conference papers:
+This project originated with Kevin Roberge and Jayson Nissen, and was
+reported in two conference papers:
 
-* Roberge et al., "Calculus Cognitive Diagnostic: Mathematics skills tested in
-  first semester calculus courses" (PERC 2025)
-* Roberge et al., "Moving Beyond Total Scores with Skill-Proficiency Profiles
-  on Concept Inventories" (RUME conference proceedings)
+* Roberge, K., Le, V., Van Dusen, B., & Nissen, J. M. (2025). Calculus
+  Cognitive Diagnostic: Mathematics skills tested in first semester calculus
+  courses. *2025 PERC Proceedings*, 368-373.
+  https://doi.org/10.1119/perc.2025.pr.Roberge
+* Roberge, K., Nissen, J. M., Le, V., & Van Dusen, B. (2026). Moving Beyond
+  Total Scores with Skill-Proficiency Profiles on Concept Inventories.
+  *Proceedings of the Conference on Research in Undergraduate Mathematics
+  Education.* (The file in this repo is a presubmission draft -- its own
+  reference list cites itself with placeholder page numbers, so final
+  volume/page/DOI details aren't available yet. Per the Roberge agendas,
+  it was accepted in Oct 2025 and presented Feb 26-28, 2026, despite the
+  "RUME 2025" name still used for the file and variables throughout this
+  codebase.)
+
+Author affiliations: Kevin Roberge, University of Maine; Vy Le and Ben Van
+Dusen, School of Education, Iowa State University; Jayson M. Nissen,
+Department of Physics, Montana State University.
 
 Michael Bostick inherited the project and is extending it toward an IJRUME
 journal submission.
