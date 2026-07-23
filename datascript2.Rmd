@@ -233,18 +233,20 @@ prepare_cci <- function(data) {
 cci_data_v13 <- prepare_cci(lasso_data)
 ```
 
-For CCA, an administration needs responses to at least 80% of its 18 items,
-and item 12 must be `"F"`. Eligible scores are converted to percentages. Item
-12 is excluded from the final CCA file.
+For CCA, an administration needs responses to at least 80% of its 18 items.
+Eligible scores are converted to percentages. Item 12 is excluded from the
+final CCA file.
 
-**UNVERIFIED RULE, currently disabling all CCA output:** in the full 2015-2025
-LASSO export, zero rows of any assessment type have `admin_1_12_answer == "F"`
-(`pre_12`/`post_12` here). `prepare_cca()` therefore NAs every CCA score, and
-the sanity check below stops the render rather than silently writing an empty
-`cca_data_v13.csv`. Item 12's LASSO score field (`admin_1_12_score`) does hold
-real 0/1 data, so the intended rule is presumably something else -- possibly a
-stale assumption from an older CCA form. This needs Kevin/Jayson's input
-before it can be fixed; do not guess at a replacement rule.
+**Resolved (2026-07-23):** the handed-off script also required
+`pre_12`/`post_12 == "F"` before converting a score to a percentage. Verified
+this matches zero rows anywhere in the full 2015-2025 LASSO export -- item
+12's real values are `"6"`/`"4"`/blank, never `"F"` -- so it silently NA'd
+every CCA score, even rows with a real raw `admin_1_score` present (checked
+directly: 29/38 2024 rows and 52/140 2025 rows have one). Neither PERC2025
+nor RUME2025's documented exclusion criteria mention item 12 at all -- both
+papers state only "<5 minutes to complete OR <80% of questions attempted."
+Removed below; CCA now uses the same eligibility pattern as `prepare_cci()`
+above.
 
 ```{r prepare-cca, include=FALSE}
 prepare_cca <- function(data) {
@@ -253,18 +255,8 @@ prepare_cca <- function(data) {
     mutate(
       pre_attempted = rowSums(!is.na(select(., matches("^pre_\\d{1,2}$")))),
       post_attempted = rowSums(!is.na(select(., matches("^post_\\d{1,2}$")))),
-      pre_score = if_else(pre_attempted < 0.8 * 18, NA_real_, pre_score),
-      post_score = if_else(post_attempted < 0.8 * 18, NA_real_, post_score),
-      pre_score = if_else(
-        is.na(pre_12) | pre_12 != "F",
-        NA_real_,
-        100 * pre_score / 18
-      ),
-      post_score = if_else(
-        is.na(post_12) | post_12 != "F",
-        NA_real_,
-        100 * post_score / 18
-      )
+      pre_score = if_else(pre_attempted < 0.8 * 18, NA_real_, 100 * pre_score / 18),
+      post_score = if_else(post_attempted < 0.8 * 18, NA_real_, 100 * post_score / 18)
     ) %>%
     filter(!(is.na(pre_score) & is.na(post_score))) %>%
     group_by(course_id) %>%
@@ -279,16 +271,6 @@ prepare_cca <- function(data) {
 }
 
 cca_data_v13 <- prepare_cca(lasso_data)
-
-if (nrow(cca_data_v13) == 0) {
-  stop(
-    "prepare_cca() produced zero rows: the 'item 12 == F' eligibility rule ",
-    "matched no records. This is a known-unverified rule -- see the note ",
-    "above. Resolve with Kevin/Jayson before proceeding; do not bypass this ",
-    "check by relaxing the rule without confirming the intended criterion.",
-    call. = FALSE
-  )
-}
 ```
 
 # Clean and export PCA data

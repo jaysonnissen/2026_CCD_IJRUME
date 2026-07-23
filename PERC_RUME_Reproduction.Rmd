@@ -1,0 +1,650 @@
+---
+title: "Reproducing PERC2025 and RUME2025 from v12 Data"
+date: "2026-07-23"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  run_perc: false
+  run_rume: false
+  qmatrix_path: "Qmatrix.xlsx"
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+required_packages <- c(
+  "dplyr", "tidyr", "readxl", "GDINA", "networkD3", "lmerTest",
+  "stringr", "tibble", "knitr"
+)
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages)) {
+  stop("Install the required packages before rendering: ",
+       paste(missing_packages, collapse = ", "))
+}
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+if (!exists("params")) {
+  params <- list(run_perc = FALSE, run_rume = FALSE, qmatrix_path = "Qmatrix.xlsx")
+}
+set.seed(1234)
+run_perc <- isTRUE(params$run_perc)
+run_rume <- isTRUE(params$run_rume)
+qmatrix_path <- params$qmatrix_path
+```
+
+# Purpose
+
+`IJRUME_analysis.R`/`.Rmd` read `cci_data_v12.csv`/`cca_data_v12.csv` as a
+frozen historical dataset, but that dataset is not actually frozen -- see
+below. This document asks: **can filtering the current `v12` files down to
+each paper's stated date window recover the papers' reported sample sizes
+and results?**
+
+It's self-contained (doesn't `source()` `IJRUME_analysis.R`/`.Rmd`) but
+deliberately reuses the *same modeling choices* as the legacy
+`IJRUME_analysis.R` -- DINA for CCA/CCI, GDINA for PCA, matching both what
+the papers report and what that script does -- applied to a data-filtering
+step the original script never needed, because `v12` hadn't been appended
+to yet when it was written. It does **not** apply any of the methodological
+corrections in `IJRUME_analysis.Rmd` (all-GDINA, invariant 3PL); the goal
+here is matching what actually produced the papers, not improving on it.
+
+Model fitting (DINA/GDINA/HLM) is slow, so it's gated behind
+`params$run_perc`/`params$run_rume` (both default `FALSE`). The
+descriptive-stats and filtering sections below run regardless and are fast.
+Set both to `TRUE` for a full run -- expect it to take a while.
+
+## Why we think filtering will work
+
+**The postman file isn't usable as a primary source, but it explains the
+mismatch.** `unused_files/postman_cci_cca_regular_download_sept_2025.csv`
+is a raw LASSO export -- 1,870 CCA response rows, 804 CaCI (CCI) response
+rows, using a different, newer `student_id` scheme (UUIDs) than most of
+`v12` (older numeric IDs). Its CCI/CaCI coverage only starts **Fall 2024**
+-- no history before that at all -- so it can't stand in for the 2021-2024
+CCI data the papers actually used. But matched by `student_id`, it lines up
+**exactly** with the newest rows of both `v12` files: 51 CCA rows (Fall
+2024/Spring 2025) and 283 CCI rows (Spring 2025). That's strong evidence
+`cci_data_v12.csv`/`cca_data_v12.csv` were appended to with an export like
+this one *after* PERC2025 was submitted (~June 2025) -- meaning the current
+`v12` files are supersets of what the papers actually analyzed, not frozen
+snapshots.
+
+**Verified filter bounds** (confirmed by direct execution: filtering
+`cca_data_v12.csv` to `year %in% 2019:2023` removes exactly those 51 rows;
+filtering `cci_data_v12.csv` to `year %in% 2021:2024` removes exactly those
+283):
+
+| Paper | Instrument | Year filter | What it removes |
+|---|---|---|---|
+| PERC2025 | CCA | `2019:2023` | the 51-row Fall2024/Spring2025 append |
+| PERC2025 | CCI | `2021:2024` | the 283-row Spring2025 append |
+| PERC2025 | PCA | `2015:2018` | nothing -- already exactly this range |
+| RUME2025 | CCI | `2021:2024` | same as PERC2025 |
+| RUME2025 | PCA | `2016:2018` | 2015 rows; narrows institutions 7->6, matching RUME's stated "six institutions" |
+
+(RUME2025 has no CCA table or analysis.)
+
+**What filtering can't fix**: institution *counts* don't fully close even
+after year-filtering -- e.g. PCA has 7 institutions locally under PERC's
+window, but PERC states 8. Filtering only removes rows; it can't add back
+an institution's worth of data that isn't present locally. Reported as a
+separate, still-open gap below, not papered over.
+
+**A separate, already-fixed issue, noted to avoid confusion**: `v13`'s CCA
+data (produced by `datascript2.R`/`.Rmd`, not used here) previously had
+zero valid scores due to an unrelated bug -- a bogus `item_12 == "F"`
+eligibility check that matched nothing in the LASSO export. That's fixed as
+of 2026-07-23 (see `datascript2.R`'s header). It's unrelated to this
+document, which works entirely from `v12`.
+
+**Assumption carried into this analysis**: `v12`'s existing
+`pre_score`/`post_score` non-missingness is treated as already reflecting
+the papers' stated eligibility rule ("<5 minutes to complete OR <80% of
+questions attempted") -- these are received historical files, not something
+this project has the original prep script for, so re-deriving that rule
+from raw LASSO data is out of scope here.
+
+# Data prep
+
+```{r load-data}
+cci_data <- read.csv("cci_data_v12.csv", stringsAsFactors = FALSE)
+cca_data <- read.csv("cca_data_v12.csv", stringsAsFactors = FALSE)
+pca_data <- read.csv("pca_data.csv", stringsAsFactors = FALSE)
+
+filter_by_year <- function(data, years) {
+  filter(data, year %in% years)
+}
+```
+
+```{r scoring-helpers}
+cci_pre_key <- c(
+  pre_3 = "e", pre_4 = "e", pre_5 = "a", pre_6 = "e", pre_7 = "c",
+  pre_8 = "c", pre_9 = "b", pre_10 = "e", pre_11 = "b", pre_12 = "a",
+  pre_13 = "b", pre_14 = "a", pre_15 = "a", pre_16 = "d", pre_17 = "c",
+  pre_18 = "a", pre_19 = "b", pre_20 = "a", pre_21 = "d", pre_22 = "c",
+  pre_23 = "a", pre_24 = "a"
+)
+cci_post_key <- setNames(unname(cci_pre_key), sub("^pre_", "post_", names(cci_pre_key)))
+
+cca_pre_key <- c(
+  pre_1 = "b", pre_2 = "b", pre_3 = "b", pre_4 = "c", pre_5 = "a",
+  pre_6 = "c", pre_7 = "d", pre_8 = "c", pre_9 = "b", pre_10 = "d",
+  pre_11 = "b", pre_13 = "d", pre_14 = "b", pre_15 = "b", pre_16 = "d",
+  pre_17 = "a", pre_18 = "c"
+)
+cca_post_key <- setNames(unname(cca_pre_key), sub("^pre_", "post_", names(cca_pre_key)))
+
+score_items <- function(data, pre_key, post_key) {
+  response_columns <- c(names(pre_key), names(post_key))
+  data |>
+    mutate(across(all_of(response_columns), tolower)) |>
+    mutate(
+      across(all_of(names(pre_key)), ~ as.integer(.x == pre_key[cur_column()])),
+      across(all_of(names(post_key)), ~ as.integer(.x == post_key[cur_column()]))
+    )
+}
+
+cci_pre_items <- names(cci_pre_key)
+cci_post_items <- names(cci_post_key)
+cca_pre_items <- names(cca_pre_key)
+cca_post_items <- names(cca_post_key)
+pca_pre_items <- paste0("pre_", 1:25, "_C")
+pca_post_items <- paste0("post_", 1:25, "_C")
+
+cci_scored <- score_items(cci_data, cci_pre_key, cci_post_key)
+cca_scored <- score_items(cca_data, cca_pre_key, cca_post_key)
+# pca_data already has binary _C item columns; no scoring needed.
+```
+
+```{r qmatrix-helpers}
+has_qmatrix <- file.exists(qmatrix_path)
+
+load_qmatrix <- function(sheet, item_count, attribute_count, columns_to_drop = "LO") {
+  qmatrix <- readxl::read_excel(qmatrix_path, sheet = sheet) |>
+    select(-any_of(columns_to_drop))
+  if (nrow(qmatrix) != item_count || ncol(qmatrix) != attribute_count) {
+    stop(
+      "Q-matrix sheet '", sheet, "' must have ", item_count, " rows and ",
+      attribute_count, " attribute columns after metadata columns are removed."
+    )
+  }
+  qmatrix
+}
+```
+
+# PERC2025 reproduction
+
+PERC2025's design is a **single post-course administration** per instrument
+(not matched pre/post pairs) -- so all comparisons below use respondents
+with `post_score` non-missing.
+
+## Table I: descriptive statistics
+
+```{r perc-table1-descriptives}
+summarize_post_only <- function(data, assessment) {
+  post <- data |> filter(!is.na(post_score))
+  tibble(
+    assessment = assessment,
+    n = nrow(post),
+    mean = round(mean(post$post_score), 1),
+    median = round(median(post$post_score), 1),
+    sd = round(sd(post$post_score), 1)
+  )
+}
+
+unfiltered_table_i <- bind_rows(
+  summarize_post_only(cca_data, "CCA"),
+  summarize_post_only(cci_data, "CCI"),
+  summarize_post_only(pca_data, "PCA")
+)
+
+filtered_table_i <- bind_rows(
+  summarize_post_only(filter_by_year(cca_data, 2019:2023), "CCA"),
+  summarize_post_only(filter_by_year(cci_data, 2021:2024), "CCI"),
+  summarize_post_only(filter_by_year(pca_data, 2015:2018), "PCA")
+)
+
+published_table_i <- tribble(
+  ~assessment, ~n,    ~mean, ~median, ~sd,
+  "CCA",       1463,  37.7,  33.3,    17.5,
+  "CCI",       1409,  38.5,  36.4,    18.1,
+  "PCA",       1260,  44.3,  42.3,    17.7
+)
+
+comparison_table_i <- bind_rows(
+  mutate(unfiltered_table_i, source = "Unfiltered (current v12)"),
+  mutate(filtered_table_i, source = "Year-filtered"),
+  mutate(published_table_i, source = "Published")
+) |> arrange(assessment, source)
+
+kable(comparison_table_i, caption = "PERC2025 Table I -- descriptive statistics")
+```
+
+## Institution/course/instructor accounting under the filtered window
+
+```{r perc-window-accounting}
+window_accounting <- function(data, years, assessment, has_instructor = TRUE) {
+  filtered <- filter_by_year(data, years) |> filter(!is.na(post_score))
+  tibble(
+    assessment = assessment,
+    n_institutions = n_distinct(filtered$institution_id),
+    n_courses = n_distinct(filtered$course_id),
+    n_instructors = if (has_instructor) n_distinct(filtered$instructor) else NA_integer_
+  )
+}
+
+perc_window_accounting <- bind_rows(
+  window_accounting(cca_data, 2019:2023, "CCA"),
+  window_accounting(cci_data, 2021:2024, "CCI"),
+  window_accounting(pca_data, 2015:2018, "PCA", has_instructor = FALSE)
+)
+
+published_accounting <- tribble(
+  ~assessment, ~n_institutions, ~n_courses, ~n_instructors,
+  "CCA", 7, 42, 12,
+  "CCI", 5, 123, 10,
+  "PCA", 8, 40, NA_integer_
+)
+
+kable(
+  left_join(perc_window_accounting, published_accounting, by = "assessment",
+            suffix = c("_ours", "_published")),
+  caption = paste(
+    "Institution/course/instructor counts, year-filtered vs. published.",
+    "PCA's institution count (7 vs. published 8) doesn't close via year",
+    "filtering alone -- an institution's worth of data appears to be",
+    "absent from the local file, not just out-of-window; still unresolved."
+  )
+)
+```
+
+## Table IV: item distribution by skill
+
+Unaffected by data filtering -- driven entirely by the Q-matrix.
+
+```{r perc-table4-qmatrix, eval=has_qmatrix}
+q_cca <- load_qmatrix("cca", 17, 5)
+q_cci <- load_qmatrix("cci", 22, 5)
+q_pca <- load_qmatrix("pca", 25, 4, columns_to_drop = c("LO", "D"))
+
+skill_order <- c("P", "L", "D", "AD", "I")
+
+item_counts <- function(q, assessment) {
+  counts <- colSums(q)
+  full <- setNames(rep(0L, length(skill_order)), skill_order)
+  full[names(counts)] <- as.integer(counts)
+  tibble(assessment = assessment, skill = skill_order, n_items = full)
+}
+
+our_table_iv <- bind_rows(
+  item_counts(q_cca, "CCA"),
+  item_counts(q_cci, "CCI"),
+  item_counts(q_pca, "PCA")
+) |>
+  pivot_wider(names_from = assessment, values_from = n_items) |>
+  mutate(Total = CCA + CCI + PCA)
+
+published_table_iv <- tribble(
+  ~skill, ~CCA, ~CCI, ~PCA,
+  "P",  7, 6, 20,
+  "L",  4, 3, 3,
+  "D",  3, 6, 0,
+  "AD", 2, 6, 5,
+  "I",  2, 1, 1
+) |> mutate(Total = CCA + CCI + PCA)
+
+kable(our_table_iv, caption = "Our Table IV reconstruction")
+kable(published_table_iv, caption = "Published Table IV")
+values_match <- all(
+  as.matrix(select(our_table_iv, -skill)) == as.matrix(select(published_table_iv, -skill))
+)
+cat(if (values_match) "MATCH\n" else "MISMATCH -- investigate\n")
+```
+
+## Sample accounting (from the paper's prose)
+
+```{r perc-sample-accounting}
+cat("Paper's own internal inconsistency: abstract states 4,132 total",
+    "responses; Methods section separately states 4,168. Sum of the three",
+    "per-instrument n's reported in the same Methods section:",
+    sum(1463, 1409, 1260),
+    "-- matches the abstract, not the Methods sentence. This is the",
+    "paper's own inconsistency, not a reproduction error.\n")
+
+published_sample_notes <- tribble(
+  ~assessment, ~institutions, ~instructors, ~courses, ~date_range,
+  "CCA", 7, 12, 42,  "spring 2019 - fall 2023",
+  "CCI", 5, 10, 123, "fall 2021 - Winter 2024",
+  "PCA", 8, NA, 40,  "fall 2015 - summer 2018"
+)
+kable(published_sample_notes, caption = "PERC2025's stated sample composition (prose, for reference)")
+cat("Exclusion rule (both instruments): <5 minutes to complete OR <80% of",
+    "questions attempted. Repeats: first response to the most recent post",
+    "test only.\n")
+```
+
+## Table V / VI: fit statistics and classification accuracy
+
+```{r perc-fit-models, eval=run_perc && has_qmatrix}
+fit_postonly_model <- function(data, items, qmatrix, model_type) {
+  item_data <- data |>
+    select(all_of(items)) |>
+    setNames(paste0("q", seq_along(items)))
+  valid_rows <- rowSums(!is.na(item_data)) >= 2
+  list(
+    fit = GDINA::GDINA(dat = item_data[valid_rows, , drop = FALSE], Q = qmatrix, model = model_type),
+    n = sum(valid_rows)
+  )
+}
+
+cca_perc_post <- filter_by_year(cca_scored, 2019:2023) |> filter(!is.na(post_score))
+cci_perc_post <- filter_by_year(cci_scored, 2021:2024) |> filter(!is.na(post_score))
+pca_perc_post <- filter_by_year(pca_data, 2015:2018) |> filter(!is.na(post_score))
+
+fit_cca_perc <- fit_postonly_model(cca_perc_post, cca_post_items, q_cca, "DINA")
+fit_cci_perc <- fit_postonly_model(cci_perc_post, cci_post_items, q_cci, "DINA")
+fit_pca_perc <- fit_postonly_model(pca_perc_post, pca_post_items, q_pca, "GDINA")
+```
+
+```{r perc-table5, eval=run_perc && has_qmatrix}
+fit_stats <- function(fitted) {
+  mf <- GDINA::modelfit(fitted$fit)
+  tibble(RMSEA = round(mf$RMSEA2, 3), SRMSR = round(mf$SRMSR, 3), n = fitted$n)
+}
+
+our_table_v <- bind_rows(
+  mutate(fit_stats(fit_cca_perc), assessment = "CCA"),
+  mutate(fit_stats(fit_cci_perc), assessment = "CCI"),
+  mutate(fit_stats(fit_pca_perc), assessment = "PCA")
+) |> select(assessment, RMSEA, SRMSR, n)
+
+published_table_v <- tribble(
+  ~assessment, ~RMSEA, ~SRMSR,
+  "CCA", 0.035, 0.037,
+  "CCI", 0.018, 0.034,
+  "PCA", 0.034, 0.043
+)
+
+kable(our_table_v, caption = "Our Table V (year-filtered)")
+kable(published_table_v, caption = "Published Table V (cutoff 0.05 for both)")
+```
+
+```{r perc-table6, eval=run_perc && has_qmatrix}
+# GDINA::CA()$tau_k labels attributes generically ("A1".."An" in Q-matrix
+# column order), not by the Q-matrix's actual column names -- relabel using
+# the Q-matrix the fit was built from before looking anything up by skill.
+ca_row <- function(fitted, qmatrix) {
+  ca <- GDINA::CA(fitted$fit)$tau_k
+  names(ca) <- names(qmatrix)
+  sapply(skill_order, function(s) unname(round(ca[s], 2)))
+}
+
+our_table_vi <- tibble(
+  skill = skill_order,
+  CCA = ca_row(fit_cca_perc, q_cca),
+  CCI = ca_row(fit_cci_perc, q_cci),
+  PCA = ca_row(fit_pca_perc, q_pca)
+)
+
+published_table_vi <- tribble(
+  ~skill, ~CCA, ~CCI, ~PCA,
+  "P",  0.90, 0.94, 0.92,
+  "L",  0.90, 0.91, 0.68,
+  "D",  0.88, 0.94, NA_real_,
+  "AD", 0.78, 0.95, 0.87,
+  "I",  0.87, 0.98, 0.91
+)
+
+kable(our_table_vi, caption = "Our Table VI (year-filtered)", na = "-")
+kable(published_table_vi, caption = "Published Table VI", na = "-")
+```
+
+# RUME2025 reproduction
+
+RUME2025 uses **matched pre/post pairs** (both scores present), unlike
+PERC2025's post-only design, and only covers PCA and CCI (no CCA).
+
+## Table 1: item counts + classification accuracy
+
+No new computation -- RUME's published Table 1 numbers are numerically
+identical to PERC's Table IV/VI subset for PCA and CCI (already confirmed
+in `Qmatrix_documentation.Rmd`), since it's the same underlying analysis
+reused across both papers. See the PERC2025 Table IV/VI results above.
+
+## Table 2: HLM model summary
+
+```{r rume-hlm-helpers}
+summarize_matched_pairs <- function(data, assessment) {
+  matched <- data |> filter(!is.na(pre_score), !is.na(post_score))
+  tibble(
+    assessment = assessment,
+    n = nrow(matched),
+    mean_pre = round(mean(matched$pre_score), 1),
+    sd_pre = round(sd(matched$pre_score), 1),
+    mean_post = round(mean(matched$post_score), 1),
+    sd_post = round(sd(matched$post_score), 1)
+  ) |>
+    mutate(d_av = round((mean_post - mean_pre) / ((sd_pre + sd_post) / 2), 2))
+}
+
+fit_rume_hlm <- function(data) {
+  long_data <- data |>
+    select(student_id, course_id, pre_score, post_score) |>
+    filter(!is.na(pre_score), !is.na(post_score)) |>
+    pivot_longer(cols = c(pre_score, post_score), names_to = "version", values_to = "score") |>
+    mutate(version = if_else(version == "pre_score", 0, 1))
+  null_model <- lmerTest::lmer(score ~ (1 | student_id) + (1 | course_id), data = long_data, REML = TRUE)
+  fixed_model <- lmerTest::lmer(score ~ version + (1 | student_id) + (1 | course_id), data = long_data, REML = FALSE)
+  variance_components <- as.data.frame(VarCorr(null_model))
+  component_variance <- function(group) variance_components$vcov[variance_components$grp == group]
+  total_variance <- sum(component_variance("student_id"), component_variance("course_id"), component_variance("Residual"))
+  list(
+    fixed_model = fixed_model,
+    student_icc = component_variance("student_id") / total_variance,
+    course_icc = component_variance("course_id") / total_variance
+  )
+}
+```
+
+```{r rume-hlm-fit, eval=run_rume}
+cci_rume <- filter_by_year(cci_scored, 2021:2024)
+pca_rume <- filter_by_year(pca_data, 2016:2018)
+
+hlm_cci <- fit_rume_hlm(cci_rume)
+hlm_pca <- fit_rume_hlm(pca_rume)
+
+extract_hlm_table <- function(hlm_result, assessment) {
+  coefs <- summary(hlm_result$fixed_model)$coefficients
+  tibble(
+    assessment = assessment,
+    term = c("Intercept", "Post-test"),
+    coefficient = round(coefs[, "Estimate"], 2),
+    se = round(coefs[, "Std. Error"], 2),
+    df = round(coefs[, "df"], 2),
+    t = round(coefs[, "t value"], 2),
+    p = coefs[, "Pr(>|t|)"]
+  )
+}
+
+our_table_2 <- bind_rows(
+  extract_hlm_table(hlm_pca, "PCA"),
+  extract_hlm_table(hlm_cci, "CCI")
+)
+
+published_table_2 <- tribble(
+  ~assessment, ~term,       ~coefficient, ~se,  ~df,    ~t,    ~p,
+  "PCA",       "Intercept", 39.31,        1.74, 26.84,  22.56, "< 0.001",
+  "PCA",       "Post-test", 1.57,         0.45, 897.00, 3.52,  "< 0.001",
+  "CCI",       "Intercept", 34.52,        0.95, 107.03, 36.40, "< 0.001",
+  "CCI",       "Post-test", 4.54,         0.66, 474.11, 6.92,  "< 0.001"
+)
+
+kable(our_table_2, caption = "Our Table 2 (year-filtered matched pairs)")
+kable(published_table_2, caption = "Published Table 2")
+```
+
+## Matched-pairs descriptive statistics and ICCs
+
+```{r rume-descriptives, eval=run_rume}
+our_matched_descriptives <- bind_rows(
+  summarize_matched_pairs(pca_rume, "PCA"),
+  summarize_matched_pairs(cci_rume, "CCI")
+)
+
+published_matched_descriptives <- tribble(
+  ~assessment, ~n,  ~mean_pre, ~sd_pre, ~mean_post, ~sd_post, ~d_av,
+  "PCA",       897, 44.4,      17.1,    46.0,       17.3,     0.09,
+  "CCI",       469, 34.2,      15.8,    38.7,       18.2,     0.26
+)
+
+kable(our_matched_descriptives, caption = "Our matched-pairs descriptives (year-filtered)")
+kable(published_matched_descriptives, caption = "Published (prose, no formal table in RUME2025)")
+
+our_iccs <- tibble(
+  assessment = c("PCA", "CCI"),
+  student_icc = round(c(hlm_pca$student_icc, hlm_cci$student_icc), 2),
+  course_icc = round(c(hlm_pca$course_icc, hlm_cci$course_icc), 3)
+)
+published_iccs <- tribble(
+  ~assessment, ~student_icc, ~course_icc,
+  "PCA", 0.54, 0.18,
+  "CCI", 0.56, 0.069
+)
+kable(our_iccs, caption = "Our ICCs")
+kable(published_iccs, caption = "Published ICCs")
+```
+
+## Matched-pairs window accounting (unfiltered vs. filtered vs. published)
+
+```{r rume-window-accounting}
+rume_unfiltered <- bind_rows(
+  summarize_matched_pairs(pca_data, "PCA"),
+  summarize_matched_pairs(cci_data, "CCI")
+) |> mutate(source = "Unfiltered (current v12)")
+
+rume_window_accounting <- bind_rows(
+  window_accounting(pca_data, 2016:2018, "PCA", has_instructor = FALSE),
+  window_accounting(cci_data, 2021:2024, "CCI")
+)
+kable(rume_unfiltered, caption = "Unfiltered matched-pairs descriptives")
+kable(rume_window_accounting, caption = "Year-filtered institution/course/instructor counts (RUME window)")
+```
+
+## Sankey diagram reproduction (Figure 2)
+
+```{r sankey-helpers}
+prepare_cd_items <- function(data, item_columns, occasion) {
+  data |>
+    select(all_of(item_columns)) |>
+    setNames(sub(paste0("^", occasion, "_([0-9]+).*"), "q\\1", item_columns))
+}
+
+make_profile_labels <- function(fit, retained_rows, total_rows) {
+  attribute_estimates <- as.matrix(GDINA::personparm(fit, what = "EAP"))
+  if (nrow(attribute_estimates) != length(retained_rows)) {
+    stop("GDINA returned a different number of profiles than the supplied respondent rows.")
+  }
+  binary_attributes <- ifelse(attribute_estimates >= 0.5, 1L, 0L)
+  profile_labels <- apply(binary_attributes, 1, paste0, collapse = "")
+  profile_labels[apply(is.na(attribute_estimates), 1, any)] <- "Uncertain"
+  labels <- rep("Missing", total_rows)
+  labels[retained_rows] <- profile_labels
+  labels
+}
+
+make_sankey <- function(pre_labels, post_labels, minimum_n = 10) {
+  transitions <- tibble(
+    pre_class = paste("Pre:", pre_labels),
+    post_class = paste("Post:", post_labels)
+  ) |>
+    add_count(pre_class, name = "n_pre") |>
+    add_count(post_class, name = "n_post") |>
+    filter(n_pre >= minimum_n, n_post >= minimum_n) |>
+    count(pre_class, post_class, name = "value")
+  nodes <- data.frame(name = sort(unique(c(transitions$pre_class, transitions$post_class))))
+  links <- transitions |>
+    transmute(
+      source = match(pre_class, nodes$name) - 1,
+      target = match(post_class, nodes$name) - 1,
+      value
+    )
+  networkD3::sankeyNetwork(
+    Links = links, Nodes = nodes, Source = "source", Target = "target",
+    Value = "value", NodeID = "name", fontSize = 16, nodeWidth = 30, width = 800
+  )
+}
+
+fit_profile_reproduction <- function(clean_data, pre_items, post_items, qmatrix, model_type) {
+  pre_data <- prepare_cd_items(clean_data, pre_items, "pre")
+  post_data <- prepare_cd_items(clean_data, post_items, "post")
+  pre_rows <- which(rowSums(!is.na(pre_data)) >= 2)
+  post_rows <- which(rowSums(!is.na(post_data)) >= 2)
+  if (!length(pre_rows) || !length(post_rows)) {
+    stop("No respondents have enough valid item responses for GDINA.")
+  }
+  pre_fit <- GDINA::GDINA(dat = pre_data[pre_rows, , drop = FALSE], Q = qmatrix, model = model_type)
+  post_fit <- GDINA::GDINA(dat = post_data[post_rows, , drop = FALSE], Q = qmatrix, model = model_type)
+  pre_labels <- make_profile_labels(pre_fit, pre_rows, nrow(clean_data))
+  post_labels <- make_profile_labels(post_fit, post_rows, nrow(clean_data))
+  list(
+    plot = make_sankey(pre_labels, post_labels),
+    pre_labels = pre_labels,
+    post_labels = post_labels
+  )
+}
+```
+
+```{r sankey-fit, eval=run_rume && has_qmatrix}
+cci_rume_matched <- cci_rume |> filter(!is.na(pre_score), !is.na(post_score))
+pca_rume_matched <- pca_rume |> filter(!is.na(pre_score), !is.na(post_score))
+
+sankey_cci <- fit_profile_reproduction(cci_rume_matched, cci_pre_items, cci_post_items, q_cci, "DINA")
+sankey_pca <- fit_profile_reproduction(pca_rume_matched, pca_pre_items, pca_post_items, q_pca, "GDINA")
+
+sankey_pca$plot
+sankey_cci$plot
+```
+
+```{r sankey-prose-stats, eval=run_rume && has_qmatrix}
+zero_profile <- function(labels) mean(labels != "Missing" & labels != "Uncertain" & grepl("^0+$", labels))
+
+cat("PCA '0000' group: pretest", round(100 * zero_profile(sankey_pca$pre_labels), 1),
+    "% -> posttest", round(100 * zero_profile(sankey_pca$post_labels), 1),
+    "% of respondents (published: -51% change)\n")
+cat("CCI '00000' group: pretest", round(100 * zero_profile(sankey_cci$pre_labels), 1),
+    "% -> posttest", round(100 * zero_profile(sankey_cci$post_labels), 1),
+    "% of respondents (published: -12% change)\n")
+
+cci_no_proficiency_pre <- sankey_cci$pre_labels %in% c("00000", "00001")
+cci_stayed <- cci_no_proficiency_pre & sankey_cci$post_labels %in% c("00000", "00001")
+cat("CCI: of", sum(cci_no_proficiency_pre), "starting with no proficiency,",
+    sum(cci_stayed), "stayed there (",
+    round(100 * sum(cci_stayed) / sum(cci_no_proficiency_pre), 1),
+    "%) -- published: 336 of 378, 89%\n")
+
+cci_high_proficiency_post <- sapply(strsplit(sankey_cci$post_labels, ""), function(x) sum(x == "1") >= 4)
+cat("CCI: n finishing with >=4 of 5 skills:", sum(cci_high_proficiency_post, na.rm = TRUE),
+    "-- published claims 17% (37 students), but 37/378 =",
+    round(100 * 37 / 378, 1),
+    "%, not 17% -- the paper's denominator for this specific claim is",
+    "unconfirmed against its own Figure 2; reported here without guessing",
+    "at a different base.\n")
+
+count_below_threshold <- function(labels, minimum_n = 10) {
+  tab <- table(labels[labels != "Missing"])
+  dropped_profiles <- names(tab)[tab < minimum_n]
+  list(n_students = sum(tab[dropped_profiles]), n_profiles = length(dropped_profiles))
+}
+pca_dropped <- count_below_threshold(sankey_pca$pre_labels)
+cci_dropped <- count_below_threshold(sankey_cci$pre_labels)
+cat("Alluvial-filtering (<10-per-profile) drops -- PCA:", pca_dropped$n_students,
+    "students /", pca_dropped$n_profiles, "profiles (published: 24/6); CCI:",
+    cci_dropped$n_students, "students /", cci_dropped$n_profiles,
+    "profiles (published: 39/14)\n")
+```

@@ -790,12 +790,16 @@ make_sankey <- function(pre_labels, post_labels, minimum_n = 10) {
   )
 }
 
+load_qmatrix <- function(sheet, item_count, attribute_count, columns_to_drop = "LO") {
+  readxl::read_excel(qmatrix_path, sheet = sheet) |>
+    select(-any_of(columns_to_drop)) |>
+    validate_qmatrix(item_count, attribute_count, sheet)
+}
+
 fit_profile_sankey <- function(clean_data, pre_items, post_items, qmatrix_sheet,
                                attribute_count,
                                qmatrix_columns_to_drop = "LO") {
-  qmatrix <- readxl::read_excel(qmatrix_path, sheet = qmatrix_sheet) |>
-    select(-any_of(qmatrix_columns_to_drop)) |>
-    validate_qmatrix(length(pre_items), attribute_count, qmatrix_sheet)
+  qmatrix <- load_qmatrix(qmatrix_sheet, length(pre_items), attribute_count, qmatrix_columns_to_drop)
   pre_data <- prepare_cd_items(clean_data, pre_items, "pre")
   post_data <- prepare_cd_items(clean_data, post_items, "post")
 
@@ -812,9 +816,17 @@ fit_profile_sankey <- function(clean_data, pre_items, post_items, qmatrix_sheet,
   post_fit <- GDINA::GDINA(
     dat = post_data[post_rows, , drop = FALSE], Q = qmatrix, model = "GDINA"
   )
-  make_sankey(
-    make_profile_labels(pre_fit, pre_rows, nrow(clean_data)),
-    make_profile_labels(post_fit, post_rows, nrow(clean_data))
+  pre_labels <- make_profile_labels(pre_fit, pre_rows, nrow(clean_data))
+  post_labels <- make_profile_labels(post_fit, post_rows, nrow(clean_data))
+  list(
+    plot        = make_sankey(pre_labels, post_labels),
+    qmatrix     = qmatrix,
+    pre_fit     = pre_fit,
+    post_fit    = post_fit,
+    pre_rows    = pre_rows,
+    post_rows   = post_rows,
+    pre_labels  = pre_labels,
+    post_labels = post_labels
   )
 }
 ```
@@ -827,7 +839,7 @@ if (!has_qmatrix) {
     sep = ""
   )
 } else {
-  sankey_plots <- list(
+  sankey_results <- list(
     PCA = fit_profile_sankey(
       pca_clean, pca_pre_items, pca_post_items, "pca",
       attribute_count = 4,
@@ -842,7 +854,7 @@ if (!has_qmatrix) {
       attribute_count = 5
     )
   )
-  sankey_plots
+  lapply(sankey_results, `[[`, "plot")
 }
 ```
 
@@ -853,10 +865,10 @@ not run by default because it writes `pca_sankey.html`, `cci_sankey.html`,
 their PNG screenshots, and `sankeys_side_by_side.png`.
 
 ```{r export-sankey-images, eval=run_cdm && export_sankey_images}
-stopifnot(exists("sankey_plots"))
+stopifnot(exists("sankey_results"))
 
-htmlwidgets::saveWidget(sankey_plots$PCA, "pca_sankey.html", selfcontained = TRUE)
-htmlwidgets::saveWidget(sankey_plots$CCI, "cci_sankey.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(sankey_results$PCA$plot, "pca_sankey.html", selfcontained = TRUE)
+htmlwidgets::saveWidget(sankey_results$CCI$plot, "cci_sankey.html", selfcontained = TRUE)
 webshot2::webshot("pca_sankey.html", file = "pca_sankey.png",
                   vwidth = 900, vheight = 600, zoom = 2)
 webshot2::webshot("cci_sankey.html", file = "cci_sankey.png",
@@ -881,4 +893,120 @@ cci_image <- magick::image_extent(
 spacer <- magick::image_blank(width = 100, height = target_height, color = "white")
 magick::image_append(c(pca_image, spacer, cci_image), stack = FALSE) |>
   magick::image_write("sankeys_side_by_side.png")
+```
+
+# Current tables for the IJRUME manuscript
+
+These are the numbers this project will actually use going forward,
+computed via the corrected pipeline above (all-GDINA, invariant 3PL,
+row-alignment-fixed Sankey) on the full current data -- no year-filtering,
+no published-value comparison. For a comparison against PERC2025/RUME2025's
+published numbers using year-filtered data and the original DINA/GDINA
+methodology, see `PERC_RUME_Reproduction.Rmd`.
+
+## Descriptive statistics
+
+```{r current-descriptives}
+score_summary |> filter(version == "Post")
+
+summarize_matched_pairs <- function(data, assessment) {
+  matched <- data |> filter(!is.na(pre_score), !is.na(post_score))
+  tibble::tibble(
+    assessment = assessment,
+    n = nrow(matched),
+    mean_pre = round(mean(matched$pre_score), 1),
+    sd_pre = round(sd(matched$pre_score), 1),
+    mean_post = round(mean(matched$post_score), 1),
+    sd_post = round(sd(matched$post_score), 1)
+  ) |>
+    mutate(d_av = round((mean_post - mean_pre) / ((sd_pre + sd_post) / 2), 2))
+}
+
+bind_rows(
+  summarize_matched_pairs(cci_data, "CCI"),
+  summarize_matched_pairs(cca_data, "CCA"),
+  summarize_matched_pairs(pca_data, "PCA")
+)
+```
+
+## Item distribution by skill
+
+```{r current-item-distribution, eval=has_qmatrix}
+skill_order <- c("P", "L", "D", "AD", "I")
+
+item_counts <- function(q, assessment) {
+  counts <- colSums(q)
+  full <- setNames(rep(0L, length(skill_order)), skill_order)
+  full[names(counts)] <- as.integer(counts)
+  tibble::tibble(assessment = assessment, skill = skill_order, n_items = full)
+}
+
+bind_rows(
+  item_counts(load_qmatrix("cca", length(cca_pre_items), 5), "CCA"),
+  item_counts(load_qmatrix("cci", length(cci_pre_items), 5), "CCI"),
+  item_counts(load_qmatrix("pca", length(pca_pre_items), 4, c("LO", "D")), "PCA")
+) |>
+  pivot_wider(names_from = assessment, values_from = n_items) |>
+  mutate(Total = CCA + CCI + PCA)
+```
+
+## Fit statistics and classification accuracy
+
+```{r current-fit-stats, eval=run_cdm && has_qmatrix}
+fit_stats <- function(fit) {
+  mf <- GDINA::modelfit(fit)
+  tibble::tibble(RMSEA = round(mf$RMSEA2, 3), SRMSR = round(mf$SRMSR, 3))
+}
+
+bind_rows(
+  mutate(fit_stats(sankey_results$CCA$post_fit), assessment = "CCA"),
+  mutate(fit_stats(sankey_results$CCI$post_fit), assessment = "CCI"),
+  mutate(fit_stats(sankey_results$PCA$post_fit), assessment = "PCA")
+) |> select(assessment, RMSEA, SRMSR)
+
+# GDINA::CA()$tau_k labels attributes generically ("A1".."An" in Q-matrix
+# column order); relabel using the Q-matrix each fit was built from.
+ca_row <- function(result) {
+  ca <- GDINA::CA(result$post_fit)$tau_k
+  names(ca) <- names(result$qmatrix)
+  sapply(skill_order, function(s) unname(round(ca[s], 2)))
+}
+
+tibble::tibble(
+  skill = skill_order,
+  CCA = ca_row(sankey_results$CCA),
+  CCI = ca_row(sankey_results$CCI),
+  PCA = ca_row(sankey_results$PCA)
+)
+```
+
+## HLM model summary
+
+```{r current-hlm-table, eval=run_models}
+extract_hlm_table <- function(hlm_result, assessment) {
+  coefs <- summary(hlm_result$fixed_change_model)$coefficients
+  tibble::tibble(
+    assessment = assessment,
+    term = c("Intercept", "Post-test"),
+    coefficient = round(coefs[, "Estimate"], 2),
+    se = round(coefs[, "Std. Error"], 2),
+    df = round(coefs[, "df"], 2),
+    t = round(coefs[, "t value"], 2),
+    p = coefs[, "Pr(>|t|)"]
+  )
+}
+
+bind_rows(
+  extract_hlm_table(hlm_results$CCA, "CCA"),
+  extract_hlm_table(hlm_results$CCI, "CCI"),
+  extract_hlm_table(hlm_results$PCA, "PCA")
+)
+```
+
+## Sankey diagrams
+
+```{r current-sankey-display, eval=run_cdm && has_qmatrix}
+sankey_results$PCA$plot
+sankey_results$CCI$plot
+sankey_results$CCA$plot
 ```

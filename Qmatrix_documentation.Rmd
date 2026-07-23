@@ -530,9 +530,7 @@ caveat above). Confirmed by:
 
 * LASSO's API (`/api/assessments/{year}/regular/export`, the only endpoint
   this project's code uses) returns item numbers, item-bank codes, response
-  letters, timing, and scores -- never question text. The Postman collection
-  and guide document only this same response-export shape; no separate
-  item-content endpoint is documented anywhere available to us.
+  letters, timing, and scores -- never question text.
 * No codebook file sits alongside `pca_8_23_df.csv` or any LASSO download.
 * `CCD-second coding.xlsx`'s coding tabs (`Coding-KR`, `Coding-JN`,
   `2ndCoding Qs`, `CCI Q`/`CCA Q`/`PCA Q`) are binary item-by-LO flag
@@ -540,23 +538,17 @@ caveat above). Confirmed by:
 * Epstein (2013), CCI's validation paper, has no item-level content either
   (it's a methods/validity article, not an item bank).
 
-**Getting the rest requires pulling it from LASSO directly** (Michael has
-login access; the site renders items as HTML, one at a time, with no
-copy/export function). See the note in this document's accompanying chat
-for a proposed workflow: capture each item's full rendered HTML (not just
-visible text, so any LaTeX/MathML markup survives) via browser dev tools,
-paste into a single delimited file, and this document's next revision can
-add a chunk to parse that into a clean table -- once a first sample shows
-what LASSO's actual markup looks like.
+Filling this in is still unfinished work -- see the "Known open issues"
+section of the repo's top-level `README.md`. Test items are confidential
+and are intentionally not reproduced, described, or extracted into this
+(public) repository beyond the already-published excerpts from Carlson
+(2010) above.
 
-**Next steps** (see the meeting-agenda memory for full detail):
+**Next steps:**
 
-1. Ask Jayson whether LASSO exposes a bulk item-bank/content export on the
-   admin side, since the response-export API doesn't and the web UI only
-   shows one item at a time.
-2. ~~Track down Carlson, Oehrtman & Engelke (2010)~~ -- done; see above.
-3. Resolve PCA's data provenance (see next section) -- whoever originally
+1. Confirm PCA's data provenance (see next section) -- whoever originally
    extracted `pca_8_23_df.csv` may also have item-level documentation.
+2. ~~Track down Carlson, Oehrtman & Engelke (2010)~~ -- done; see above.
 
 ## PCA's data provenance is still unresolved
 
@@ -573,11 +565,10 @@ from Jayson, not further guessing from the data alone.
 # Open questions (full list)
 
 1. Confirm this reconstruction (matching Table IV exactly, above) is the Q-matrix version to build on for IJRUME -- not the later attribute-hierarchy work in `unused_files/Qmatrix_intermediate_coding_stage.xlsx`.
-2. What does CCA item 12 actually measure? (Unrelated to this Q-matrix -- see `datascript2.Rmd`.)
+2. What does CCA item 12 actually measure? The bogus `== "F"` eligibility filter built on it is fixed (2026-07-23, see `datascript2.Rmd`), but the underlying question -- what item 12 itself is checking -- is still open. (Unrelated to this Q-matrix.)
 3. Should `C1CI`/`C2CI` (Calculus 1/2 Concept Inventory codes on LASSO) be incorporated for more CCI coverage, or are they a different instrument version?
 4. Where can we get the rest of PCA's/CCI's/CCA's item content, and can Jayson confirm LASSO's original PCA export still exists?
 5. Is LASSO's pre-2025 missing-scores bug fixed yet? (Confirmed still broken as of 2026-07-22.)
 6. Should the CDM (DINA/GDINA) fitting enforce pre/post measurement invariance, like the separate 3PL/IRT section already does?
-7. Does LASSO expose item text anywhere on the admin/instructor side, for bulk export rather than one item at a time?
-8. ~~Get a copy of Carlson, Oehrtman & Engelke (2010)~~ -- done (2026-07-22); its Table 2 is now reproduced above. Epstein (2013), CCI's validation paper, is also now in `Articles/` -- also incorporated above, though it has no item-level content.
-9. Do the five known PCA item numbers from Carlson (2010) (items 4, 5, 11, 15, 17) actually match this project's `pre_4`/`pre_5`/`pre_11`/`pre_15`/`pre_17` numbering on LASSO? Not yet confirmed.
+7. ~~Get a copy of Carlson, Oehrtman & Engelke (2010)~~ -- done (2026-07-22); its Table 2 is now reproduced above. Epstein (2013), CCI's validation paper, is also now in `Articles/` -- also incorporated above, though it has no item-level content.
+8. Do the five known PCA item numbers from Carlson (2010) (items 4, 5, 11, 15, 17) actually match this project's `pre_4`/`pre_5`/`pre_11`/`pre_15`/`pre_17` numbering on LASSO? Not yet confirmed.

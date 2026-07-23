@@ -20,12 +20,18 @@
 #     MATH) is correct here; "CalcCI" matches zero rows in the current
 #     export. This script's cci_data_v13.csv is therefore contaminated with
 #     Chemical Concept Inventory responses.
-#  2. The CCA eligibility rule requires pre_12/post_12 == "F". Zero rows of
-#     any assessment type in the full LASSO export have that value, so this
-#     rule NAs every CCA score. cca_data_v13.csv ends up with real row
-#     counts but entirely NA pre_score/post_score, because there is no
-#     subsequent filter to remove them. The actual intended rule is unknown
-#     -- needs Kevin/Jayson's input, not a guess.
+#  2. (Mike 7/23/26, RESOLVED) The CCA eligibility rule required
+#     pre_12/post_12 == "F". Verified this matches zero rows anywhere in the
+#     full 2015-2025 LASSO export -- item 12's real values are "6"/"4"/blank,
+#     never "F" -- so this rule silently NA'd every CCA score, even when a
+#     real raw score was present (checked directly: 29/38 2024 rows and
+#     52/140 2025 rows have a real admin_1_score, all wiped by this rule
+#     anyway). Neither PERC2025 nor RUME2025's documented exclusion criteria
+#     mention item 12 at all -- both papers state only "<5 minutes to
+#     complete OR <80% of questions attempted." The two lines implementing
+#     this rule are commented out below and replaced with the same pattern
+#     prepare_cci() already uses (percentage conversion gated only on the
+#     80%-attempted rule) -- see datascript2.Rmd for the corrected version.
 #  3. The both-scores-NA filter and the per-course n()>=10 minimum are
 #     applied once, on the combined multi-assessment dataset, BEFORE each
 #     assessment's own item-completion/eligibility rules run. A course can
@@ -175,18 +181,18 @@ prepare_cca <- function(data) {
     mutate(
       pre_attempted = rowSums(!is.na(select(., matches("^pre_\\d{1,2}$")))),
       post_attempted = rowSums(!is.na(select(., matches("^post_\\d{1,2}$")))),
-      pre_score = if_else(pre_attempted < 0.8 * 18, NA_real_, pre_score),
-      post_score = if_else(post_attempted < 0.8 * 18, NA_real_, post_score),
-      pre_score = if_else(
-        is.na(pre_12) | pre_12 != "F",
-        NA_real_,
-        100 * pre_score / 18
-      ),
-      post_score = if_else(
-        is.na(post_12) | post_12 != "F",
-        NA_real_,
-        100 * post_score / 18
-      )
+      # pre_score = if_else(
+      #   is.na(pre_12) | pre_12 != "F",
+      #   NA_real_,
+      #   100 * pre_score / 18
+      # ),
+      # post_score = if_else(
+      #   is.na(post_12) | post_12 != "F",
+      #   NA_real_,
+      #   100 * post_score / 18
+      # ),
+      pre_score = if_else(pre_attempted < 0.8 * 18, NA_real_, 100 * pre_score / 18),
+      post_score = if_else(post_attempted < 0.8 * 18, NA_real_, 100 * post_score / 18)
     ) %>%
     select(
       all_of(common_columns),
