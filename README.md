@@ -16,7 +16,7 @@ reported in two conference papers:
 * Roberge, K., Nissen, J. M., Le, V., & Van Dusen, B. (2026). Moving Beyond
   Total Scores with Skill-Proficiency Profiles on Concept Inventories.
   *Proceedings of the Conference on Research in Undergraduate Mathematics
-  Education.* (The file in this repo is a presubmission draft -- its own
+  Education.* (The article is a presubmission draft -- its own
   reference list cites itself with placeholder page numbers, so final
   volume/page/DOI details aren't available yet. Per the Roberge agendas,
   it was accepted in Oct 2025 and presented Feb 26-28, 2026, despite the
