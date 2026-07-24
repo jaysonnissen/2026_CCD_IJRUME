@@ -59,22 +59,40 @@ Model fitting (DINA/GDINA/HLM) is slow, so it's gated behind
 descriptive-stats and filtering sections below run regardless and are fast.
 Set both to `TRUE` for a full run -- expect it to take a while.
 
-**PCA deduplication fix, implemented (2026-07-24).** Year-filtering alone
-leaves PCA's Table I sample size well above published (n=1476 vs. 1260).
-PERC2025's methods state a rule that isn't reflected anywhere in the
-pipeline as received: *"In cases where students completed the same
-assessment multiple times, we only used their first response to the most
-recent post test."* Applying it (see `pca-dedup-helpers` below) closes
-almost all of that gap -- n=1264 vs. published 1260 -- and improves fit
-downstream: Table V's PCA RMSEA lands on an exact match (0.034), Table VI's
+**PCA fixes, implemented (2026-07-24, extended).** Year-filtering alone
+leaves PCA's Table I sample size well above published (n=1476 vs. 1260)
+and its institution/course accounting well below (6/29 vs. published
+8/40). Two fixes close most of both gaps, applied together in
+`pca-dedup-helpers` below:
+
+1. **Deduplication.** PERC2025's methods state: *"In cases where students
+   completed the same assessment multiple times, we only used their first
+   response to the most recent post test."* That rule wasn't reflected
+   anywhere in the pipeline as received.
+2. **No course-size filter.** `pca_data.csv` (the file this document used
+   to read PCA from) turns out to already bake in an undocumented "drop
+   any course with fewer than 10 raw rows" filter -- not mentioned in
+   either manuscript, and not implemented by any script currently in this
+   repo. This document now rebuilds PCA's scores directly from the raw
+   `pca_8_23_df.csv`, applying PERC's own verified eligibility rule
+   (duration >= 5 min AND >= 80% attempted) without that extra cutoff.
+
+Together these get PCA's institution count to an **exact match** (8 of 8)
+and courses within 1 (39 vs. 40; the untouched raw file alone, with zero
+filtering, matches courses exactly too -- 40 of 40). Table I's N gap closes
+from 216 to 19 (n=1279 vs. published 1260). Downstream fit improves too:
+Table V's PCA RMSEA lands on an exact match (0.034), Table VI's
 Applications-of-Derivatives classification accuracy becomes exact (0.87),
-and RUME's PCA matched-pairs effect size matches exactly (d=0.09 vs. 0.09,
-n=894 vs. published 897). It even flips the Sankey "0000" group's
-pretest-to-posttest direction from wrong (growing) to right (shrinking),
-though the published magnitude (-51%) is still far off. This fix does
-**not** generalize to CCA/CCI -- checked directly, both already have a
-post-only N at or below published, so deduplicating would pull them
-further away, not closer.
+and RUME's PCA matched-pairs institution/course counts become an **exact
+match** (6 institutions, 33 courses) with d_av exact at 0.09. The Sankey
+"0000" group's pretest-to-posttest direction also flips from wrong
+(growing) to right (shrinking: 38.2% -> 33.7%, an 11.8% relative decrease)
+-- still short of the published -51%, but the closest this reproduction has
+gotten. These fixes do **not** generalize to CCA/CCI -- checked directly,
+both already have a post-only N at or below published, so deduplicating
+would pull them further away, not closer, and `datascript2.R` (which never
+touches PCA) is the only script with a course-size filter in this repo, so
+there's no equivalent undocumented cutoff to remove for them.
 
 ## Why we think filtering will work
 
@@ -139,28 +157,61 @@ filter_by_year <- function(data, years) {
 }
 ```
 
-PCA-specific fix (2026-07-24): PERC2025's methods state *"In cases where
-students completed the same assessment multiple times, we only used their
-first response to the most recent post test."* That rule isn't reflected
-in `pca_data.csv` as received -- 255 students have repeat entries (different
-courses/terms) within PERC's year window. Applying it (keep each student's
-most-recent record, preferring one with a post-score present) closes most
-of PCA's Table I sample-size gap; see the comparison in "PERC2025 Table I"
-below. This does **not** generalize to CCA/CCI -- both already have a
-post-only N at or below published, so deduplicating would pull them
-further away, not closer (checked directly; not applied to them here).
+PCA-specific fix (2026-07-24, extended): diffing `pca_data.csv` against its
+raw source `pca_8_23_df.csv` row-by-row shows `pca_data.csv` already bakes
+in **two** transformations, only one of which either paper documents:
+
+1. **PERC2025's stated eligibility rule** -- *"excluded students who took
+   less than five minutes to complete the assessment or attempted less
+   than 80% of the questions"* -- applied independently to pre/post.
+   Verified exactly: `pre_score`/`post_score` are `NA` in `pca_data.csv`
+   if and only if `duration < 300` seconds OR `answered < 80` (percent),
+   across all 2,681 rows with zero exceptions. Legitimate and already
+   reflected in the data as received.
+2. **An undocumented "drop any course with fewer than 10 raw rows" filter**
+   -- not mentioned in either manuscript, and not implemented anywhere in
+   this repo's current scripts (`datascript2.R` never touches PCA at all,
+   so the institution-318 note in an earlier version of this document
+   attributing this to `datascript2.R` was wrong -- corrected here). It
+   removes exactly 7 courses / 34 raw rows, including institution 318's
+   only course. The raw file's course/institution footprint (8
+   institutions, 40 courses -- both **exact matches** to PERC2025's stated
+   "eight institutions across forty unique math courses") only survives if
+   this filter is *not* applied.
+
+Because that course-size cutoff isn't part of either paper's stated
+methodology, this document bypasses `pca_data.csv` for PCA entirely and
+rebuilds `pre_score`/`post_score` directly from `pca_8_23_df.csv` using the
+verified eligibility rule above -- then applies the already-established
+fixes on top: exclude non-student rows (Learning Assistant/Faculty), and
+PERC2025's *"we only used their first response to the most recent post
+test"* rule for students with repeat entries (255 in PERC's year window).
 
 ```{r pca-dedup-helpers}
-# `pca_8_23_df.csv` (the raw PCA source `pca_data.csv` is filtered from)
-# flags a small number of non-student rows (Learning Assistants, Faculty,
-# TAs) that PERC's "student" population presumably excludes; datascript2.R
-# doesn't currently filter on this. pca_data.csv itself doesn't carry the
-# student_or_la column, so pull just the student_id exclusion list from the
-# raw file rather than switching PCA's whole data source for this document.
-pca_non_student_ids <- read.csv("pca_8_23_df.csv", stringsAsFactors = FALSE) |>
-  filter(student_or_la != "Student") |>
-  pull(student_id) |>
-  unique()
+pca_raw <- read.csv("pca_8_23_df.csv", stringsAsFactors = FALSE)
+
+pca_eligible_score <- function(score, duration, answered) {
+  if_else(
+    !is.na(score) & !is.na(duration) & !is.na(answered) &
+      duration >= 300 & answered >= 80,
+    score,
+    NA_real_
+  )
+}
+
+pca_item_cols <- c(paste0("pre_", 1:25, "_C"), paste0("post_", 1:25, "_C"))
+
+# Rebuilt from the raw file (not pca_data.csv) so the undocumented
+# course-size filter never gets applied -- see prose above.
+pca_data_full <- pca_raw |>
+  mutate(
+    pre_score = pca_eligible_score(pre_score, pre_duration, pre_answered),
+    post_score = pca_eligible_score(post_score, post_duration, post_answered)
+  ) |>
+  select(
+    student_id, course_id, institution_id, year, term, student_or_la,
+    pre_score, post_score, all_of(pca_item_cols)
+  )
 
 dedup_to_latest_per_student <- function(data) {
   term_rank <- c(Spring = 1, Summer = 2, Fall = 3)
@@ -173,16 +224,16 @@ dedup_to_latest_per_student <- function(data) {
     select(-.has_post, -.term_rank)
 }
 
-pca_data_perc_deduped <- pca_data |>
+pca_data_perc_deduped <- pca_data_full |>
   filter_by_year(2015:2018) |>
-  filter(!student_id %in% pca_non_student_ids) |>
+  filter(student_or_la == "Student") |>
+  select(-student_or_la) |>
   dedup_to_latest_per_student()
 
-# Same fix, RUME's narrower year window -- confirmed to work equally well
-# there (matched-pairs n=902 vs. published 897, d_av exact match at 0.09).
-pca_data_rume_deduped <- pca_data |>
+pca_data_rume_deduped <- pca_data_full |>
   filter_by_year(2016:2018) |>
-  filter(!student_id %in% pca_non_student_ids) |>
+  filter(student_or_la == "Student") |>
+  select(-student_or_la) |>
   dedup_to_latest_per_student()
 ```
 
@@ -336,23 +387,43 @@ tibble(
   n_institutions = n_distinct(pca_deduped_post$institution_id),
   n_courses = n_distinct(pca_deduped_post$course_id)
 ) |>
-  kable(caption = "PCA institution/course counts after year-filtering + deduplication (published: 8 institutions, 40 courses)")
+  kable(caption = "PCA institution/course counts, post-only, after dedup + no course-size filter (published: 8 institutions, 40 courses)")
+
+# PERC's methods sentence ("eight institutions across forty unique math
+# courses") reads as a footprint statement, not restricted to students with
+# a valid post-score -- so also report counts over every eligible (pre-or-
+# post) student, and over the untouched raw file with no filtering at all.
+tibble(
+  n_institutions = n_distinct(pca_data_perc_deduped$institution_id),
+  n_courses = n_distinct(pca_data_perc_deduped$course_id)
+) |>
+  kable(caption = "PCA institution/course counts, all eligible students (pre-or-post) after dedup (published: 8 institutions, 40 courses)")
+
+tibble(
+  n_institutions = n_distinct(pca_raw$institution_id),
+  n_courses = n_distinct(pca_raw$course_id)
+) |>
+  kable(caption = "PCA institution/course counts, raw file, zero filtering (published: 8 institutions, 40 courses)")
 ```
 
-**PCA's missing 8th institution, identified (2026-07-24):** `institution_id`
-318 exists in the raw `pca_8_23_df.csv` (8 institutions total, matching
-PERC's stated count exactly) but not in the processed `pca_data.csv` (7
-institutions) that this document and `IJRUME_analysis.R`/`.Rmd` read.
-Institution 318 has exactly 6 student records, all in a single course
-(`course_id` 592, Spring 2017) -- dropped entirely by `datascript2.R`'s
-"at least 10 students per course" minimum-course-size rule, since that's
-the institution's only course. **This doesn't explain any of PCA's sample-
-size gap, though**: all 6 of those students have a valid pretest score but
-zero have a posttest score, so none of them would count toward PERC's
-post-only Table I population (n=1260) even if the course-size rule didn't
-drop them. It only explains the institution *count* discrepancy in
-isolation -- the actual N gap (published 1260 vs. our ~1476 post-only) has
-a separate, still-unresolved cause.
+**PCA's institution/course accounting, resolved (2026-07-24):** earlier
+versions of this document attributed institution 318's absence from
+`pca_data.csv` to `datascript2.R`'s course-size rule -- wrong, since
+`datascript2.R` never processes PCA at all (confirmed by direct
+inspection). The real cause, found by diffing `pca_data.csv` against
+`pca_8_23_df.csv`: **`pca_data.csv` itself already has an undocumented
+"drop courses with fewer than 10 raw rows" filter baked in**, applied by
+whatever process produced it (not by any script currently in this repo).
+It removes exactly 7 courses / 34 rows, including institution 318's only
+course (`course_id` 592, Spring 2017, 6 students, all pretest-only). Since
+neither manuscript's methods section mentions a course-size cutoff, and
+the raw file's own institution/course footprint (8 institutions, 40
+courses -- see the third table above) matches PERC2025's stated "eight
+institutions across forty unique math courses" **exactly**, this document
+now rebuilds PCA's scores directly from the raw file (see
+`pca-dedup-helpers`) instead of reading the filtered `pca_data.csv` --
+recovering that exact match on institutions, and landing within 1 on
+courses.
 
 ## Table IV: item distribution by skill
 
@@ -633,11 +704,17 @@ kable(
   summarize_matched_pairs(pca_data_rume_deduped, "PCA"),
   caption = "PCA matched-pairs descriptives after deduplication (published: n=897, pre 44.4/17.1, post 46.0/17.3, d=0.09)"
 )
+# RUME's institution/course sentence describes the matched-pairs
+# population specifically (unlike PERC's, which describes all eligible
+# students -- see the PERC section above), so filter to matched pairs
+# before counting, matching what summarize_matched_pairs() does for n.
+pca_rume_matched_for_counts <- pca_data_rume_deduped |>
+  filter(!is.na(pre_score), !is.na(post_score))
 tibble(
-  n_institutions = n_distinct(pca_data_rume_deduped$institution_id),
-  n_courses = n_distinct(pca_data_rume_deduped$course_id)
+  n_institutions = n_distinct(pca_rume_matched_for_counts$institution_id),
+  n_courses = n_distinct(pca_rume_matched_for_counts$course_id)
 ) |>
-  kable(caption = "PCA institution/course counts after deduplication (published: 6 institutions, 33 courses)")
+  kable(caption = "PCA institution/course counts, matched pairs, after dedup + no course-size filter (published: 6 institutions, 33 courses)")
 ```
 
 ## Sankey diagram reproduction (Figure 2)

@@ -100,58 +100,71 @@ script and the go-forward `.Rmd` files, which don't do any year-filtering.
 
 | Table | Match? | What differs |
 |---|---|---|
-| PERC Table I (descriptive stats) | Partial for CCA/CCI, close for PCA | CCA/CCI means run high vs. published (CCA +5.6, CCI +0.7). N is off in both directions -- CCA/CCI *below* published. PCA, after the dedup fix below: n=1264 vs. published 1260 (off by 4), mean 44.7 vs. 44.3. |
-| Institution/course/instructor counts | No for CCA/CCI, close for PCA | CCA 6 vs 7 institutions (25 vs 42 courses, 10 vs 12 instructors). CCI 4 vs 5 (97 vs 123, 9 vs 10). PCA, after dedup: 6 institutions vs. published 8, 29 courses vs. 40. |
+| PERC Table I (descriptive stats) | Partial for CCA/CCI, close for PCA | CCA/CCI means run high vs. published (CCA +5.6, CCI +0.7). N is off in both directions -- CCA/CCI *below* published. PCA, after the fixes below: n=1279 vs. published 1260 (off by 19), mean 44.6 vs. 44.3. |
+| Institution/course/instructor counts | No for CCA/CCI, near-exact for PCA | CCA 6 vs 7 institutions (25 vs 42 courses, 10 vs 12 instructors). CCI 4 vs 5 (97 vs 123, 9 vs 10). PCA, after the fixes: 8 institutions vs. published 8 (**exact**), 39 courses vs. published 40. |
 | PERC Table IV (item distribution) | **Exact** | Matches to the item, all 3 instruments, all 5 skills. |
-| PERC Table V (RMSEA/SRMSR) | Very close, PCA now exact on RMSEA | CCA/CCI within 0.001-0.004 of published. PCA (deduplicated population): RMSEA 0.034 vs. published 0.034 (**exact**), SRMSR 0.045 vs. 0.043. |
-| PERC Table VI (classification accuracy) | CCA exact, CCI near-exact, PCA improved | CCA: all 5 skills match exactly (0.90/0.90/0.88/0.78/0.87). CCI: 4 of 5 exact, only Integration differs (0.97 vs 0.98). PCA (deduplicated population): Applications of Derivatives now **exact** (0.87 vs. 0.87), Integration improved to 0.94 (published 0.91). Limits is still the outlier, off by 0.19 (0.87 vs. published 0.68) -- unaffected by dedup, likely a separate measurement-invariance issue (see below). |
+| PERC Table V (RMSEA/SRMSR) | Very close, PCA now exact on RMSEA | CCA/CCI within 0.001-0.004 of published. PCA (fixed population): RMSEA 0.034 vs. published 0.034 (**exact**), SRMSR 0.045 vs. 0.043. |
+| PERC Table VI (classification accuracy) | CCA exact, CCI near-exact, PCA mixed | CCA: all 5 skills match exactly (0.90/0.90/0.88/0.78/0.87). CCI: 4 of 5 exact, only Integration differs (0.97 vs 0.98). PCA (fixed population): Applications of Derivatives now **exact** (0.87 vs. 0.87). Limits is still the outlier, off by 0.18 (0.86 vs. published 0.68) -- likely a separate measurement-invariance issue (see below). |
 | RUME Table 1 | Same as PERC's | Directly reuses PERC's PCA/CCI Table IV/VI results -- no separate computation. |
 | RUME Table 2 (HLM) | Close, one metric off | Coefficients and effect direction match well for both PCA and CCI; `df` runs higher than published in both (more matched pairs in our data than the paper used). |
-| RUME matched-pairs effect sizes | **Essentially exact** | CCI d=0.27 vs. published 0.26. PCA (deduplicated): n=894 vs. published 897 (off by 3), mean_pre 45.0/17.3 vs. 44.4/17.1, mean_post 46.5/17.2 vs. 46.0/17.3, d=0.09 vs. published 0.09 (**exact**). Institutions 6 vs. 6 (**exact**), courses 32 vs. 33. |
-| RUME Sankey -- CCI | Right direction, smaller effect | "00000" (no-proficiency) group shrinks in both, similar magnitude. Unaffected by the PCA dedup fix. |
-| RUME Sankey -- PCA | Right direction after dedup, smaller magnitude | Before dedup, the "0000" group *grew* pretest-to-posttest (25.7%->36.6%), the wrong direction. After dedup it *shrinks* (39.9%->38.6%), the right direction, though still far short of published's -51% magnitude. |
+| RUME matched-pairs effect sizes | **Essentially exact** | CCI d=0.27 vs. published 0.26. PCA (fixed population): n=905 vs. published 897 (off by 8), mean_pre 44.9/17.3 vs. 44.4/17.1, mean_post 46.5/17.2 vs. 46.0/17.3, d=0.09 vs. published 0.09 (**exact**). Institutions 6 vs. 6 (**exact**), courses 33 vs. 33 (**exact**). |
+| RUME Sankey -- CCI | Right direction, smaller effect | "00000" (no-proficiency) group shrinks in both, similar magnitude. Unaffected by the PCA fixes. |
+| RUME Sankey -- PCA | Right direction, smaller magnitude | Before any fix, the "0000" group *grew* pretest-to-posttest, the wrong direction. After the fixes below it *shrinks* (38.2%->33.7%, an 11.8% relative decrease), the right direction, though still well short of published's -51% relative magnitude. |
 
-### The PCA fix that gets Table I almost exact: deduplicate repeat students
+### The two PCA fixes that get Table I and the institution/course counts almost exact
 
-PERC2025's methods state: *"In cases where students completed the same
-assessment multiple times, we only used their first response to the most
-recent post test."* That rule wasn't applied anywhere in the pipeline.
-`pca_8_23_df.csv` has 255 students with repeat entries (different
-courses/terms) in the eligible population. **Implemented** in
-`PERC_RUME_Reproduction.Rmd` (the `pca-dedup-helpers` chunk): keep each
-student's most-recent record (preferring one with a post-score present),
-excluding the handful of Learning Assistant/Faculty rows LASSO includes in
-the raw file.
+Diffing `pca_data.csv` (the file PCA was originally read from) against its
+raw source `pca_8_23_df.csv` turned up two transformations baked into it,
+only one of which either paper documents. Both are now fixed in
+`PERC_RUME_Reproduction.Rmd`'s `pca-dedup-helpers` chunk, which rebuilds
+PCA's scores directly from the raw file instead of reading `pca_data.csv`:
 
-| | n | mean | median | sd |
-|---|---|---|---|---|
-| Current (year-filtered only) | 1476 | 45.1 | 44.0 | 17.8 |
-| + deduplicated to one record/student | 1264 | 44.7 | 44.0 | 17.6 |
-| Published | 1260 | 44.3 | 42.3 | 17.7 |
+1. **Deduplication.** PERC2025's methods state: *"In cases where students
+   completed the same assessment multiple times, we only used their first
+   response to the most recent post test."* That rule wasn't applied
+   anywhere in the pipeline as received. `pca_8_23_df.csv` has 255
+   students with repeat entries (different courses/terms) in the eligible
+   population. Fix: keep each student's most-recent record (preferring one
+   with a post-score present), excluding the handful of Learning
+   Assistant/Faculty rows LASSO includes in the raw file.
+2. **An undocumented course-size filter, found and removed.** Verified by
+   diffing every row of `pca_data.csv` against `pca_8_23_df.csv`:
+   `pca_data.csv` already applies PERC's exact stated eligibility rule
+   (duration >= 5 min AND >= 80% of questions attempted, checked against
+   all 2,681 rows with zero exceptions) -- but it *also* drops every course
+   with fewer than 10 raw rows, which neither paper's methods section
+   mentions and which no script currently in this repo implements
+   (`datascript2.R` never processes PCA at all -- an earlier version of
+   this document incorrectly attributed the filter to it). That filter
+   removes 7 courses / 34 rows, including `institution_id` 318's only
+   course (6 students, all pretest-only). The raw file's own footprint --
+   **8 institutions, 40 courses, with zero filtering applied** -- matches
+   PERC2025's stated "eight institutions across forty unique math courses"
+   exactly, which is strong evidence the course-size cutoff was never part
+   of the original analysis.
 
-That closes the N gap from 216 down to 4. The fix also carries through to
-every other PCA table that uses the post-only or matched-pairs population
-(Table V, Table VI, RUME's matched-pairs stats, and the Sankey diagram) --
-see the row-by-row comparison above.
+| | n | mean | median | sd | institutions | courses |
+|---|---|---|---|---|---|---|
+| Current (year-filtered only) | 1476 | 45.1 | 44.0 | 17.8 | 6 | 29 |
+| + both fixes (dedup, no course-size filter) | 1279 | 44.6 | 44.0 | 17.6 | 8 | 39 |
+| Raw file, zero filtering at all | -- | -- | -- | -- | 8 | 40 |
+| Published | 1260 | 44.3 | 42.3 | 17.7 | 8 | 40 |
+
+That closes the N gap from 216 down to 19, and gets institutions to an
+exact match and courses within 1. The fixes carry through to every other
+PCA table that uses the post-only or matched-pairs population (Table V,
+Table VI, RUME's matched-pairs stats, and the Sankey diagram) -- see the
+row-by-row comparison above.
 
 **This doesn't generalize to CCA/CCI.** Both have repeat-student records
 too, but their post-only N is already at or below published, so
 deduplicating would only pull them further away (checked directly, not
 applied to them). Their institution-count gap looks like genuinely missing
 coverage rather than duplicate inflation, and it can't be diagnosed the
-same way PCA's was (see below) -- `v12`'s institution IDs for CCA/CCI don't
-map to the raw LASSO export's IDs in any way currently available in this
-repo.
-
-**PCA's missing 8th institution, found:** `institution_id` 318 is present
-in the raw `pca_8_23_df.csv` (8 institutions total, matching PERC exactly)
-but absent from the processed `pca_data.csv` -- it has exactly 6 student
-records, all in one course (Spring 2017), dropped by `datascript2.R`'s
-"≥10 students per course" rule (a rule neither paper's methods section
-actually mentions). This explains the institution *count* gap, but not the
-N gap: all 6 of those students have a pretest score but zero have a
-posttest score, so they wouldn't count toward PERC's post-only n=1260
-regardless of the course-size rule.
+same way PCA's was -- `v12`'s institution IDs for CCA/CCI don't map to the
+raw LASSO export's IDs in any way currently available in this repo, and
+neither `cca_data_v12.csv`/`cci_data_v12.csv` carries the course-size-filter
+provenance issue PCA had (they predate `datascript2.R` entirely).
 
 ## The Q-matrix
 
