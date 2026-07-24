@@ -16,7 +16,7 @@ reported in two conference papers:
 * Roberge, K., Nissen, J. M., Le, V., & Van Dusen, B. (2026). Moving Beyond
   Total Scores with Skill-Proficiency Profiles on Concept Inventories.
   *Proceedings of the Conference on Research in Undergraduate Mathematics
-  Education.* (The article is a presubmission draft -- its own
+  Education.* (The article is a presubmission draft, its own
   reference list cites itself with placeholder page numbers, so final
   volume/page/DOI details aren't available yet. Per the Roberge agendas,
   it was accepted in Oct 2025 and presented Feb 26-28, 2026, despite the
@@ -37,21 +37,18 @@ Every part of the pipeline has two versions, on purpose:
 | | Legacy (`.R`) | Corrected (`.Rmd`) |
 |---|---|---|
 | **Purpose** | Exactly reproduces the PERC2025/RUME conference results, as originally run | Fixes known bugs and methodological issues; the basis for the IJRUME manuscript |
-| **Editing policy** | Minimum edits only -- just enough to make the script *run* (missing files, typos, undefined variables). Known issues are documented in comments, not fixed. | Where corrections actually happen. Freely edited as understanding improves. |
+| **Editing policy** | Minimum edits only, just enough to make the script *run* (missing files, typos, undefined variables). Known issues are documented in comments, not fixed. | Where corrections actually happen. Freely edited as understanding improves. |
 | Data prep | `datascript2.R` | `datascript2.Rmd` |
 | Main analysis | `IJRUME_analysis.R` | `IJRUME_analysis.Rmd` |
 
 **Read the header comments in `IJRUME_analysis.R` and `datascript2.R` before
-touching either file** -- they list every fix that was needed just to make
+touching either file**, they list every fix that was needed just to make
 the script run, and every known-remaining issue that was deliberately left
 unfixed there (with an explanation of why, and where the fix actually lives).
-The "minimum edits only" policy applies most strictly to
+A "minimum edits only" policy applied to
 `IJRUME_analysis.R`, since that script actually produced the conference
-papers' numbers. `datascript2.R` never did -- the historical `v12` files it
-reads predate it -- so its CCA item-12 bug (see "Known open issues" below)
-was fixed directly rather than just commented on, since preserving a bug
-in a script that was never the source of the papers' data serves no
-reproduction purpose.
+papers' numbers. `datascript2.R` never did, the historical `v12` files it
+reads predate it.
 
 If your goal is reproducing the published papers exactly: run the `.R`
 files, or see `PERC_RUME_Reproduction.Rmd` (below) for a filtered
@@ -73,14 +70,14 @@ IJRUME_analysis.R  or  IJRUME_analysis.Rmd   (HLM, IRT, and CDM/Sankey analysis)
 
 `IJRUME_analysis.R`/`.Rmd` currently read `cci_data_v12.csv`/`cca_data_v12.csv`
 (the historical, already-prepared files used for the conference papers) and
-`pca_data.csv`, **not** the `_v13` files `datascript2.R`/`.Rmd` produce --
+`pca_data.csv`, **not** the `_v13` files `datascript2.R`/`.Rmd` produce,
 those v13 files are a separate, forward-looking pipeline for extending the
 dataset with newer LASSO downloads, not yet wired into the main analysis.
 See the "Version requirement" note in `IJRUME_analysis.Rmd` before changing
 this.
 
 PCA's data (`pca_8_23_df.csv`) is not currently fetched by
-`download_lasso_data.Rmd` -- its provenance is still being confirmed (see
+`download_lasso_data.Rmd`, its provenance is still being confirmed (see
 `Qmatrix_documentation.Rmd`).
 
 ## Reproducing the conference papers exactly: `PERC_RUME_Reproduction.Rmd`
@@ -93,7 +90,7 @@ closer reproduction: it applies the same modeling choices as
 `IJRUME_analysis.R` (DINA for CCA/CCI, GDINA for PCA) to `v12` data
 filtered down to each paper's stated year windows, then compares every
 resulting table against the published values side by side. It's a
-separate, self-contained document -- distinct from both the frozen `.R`
+separate, self-contained document, distinct from both the frozen `.R`
 script and the go-forward `.Rmd` files, which don't do any year-filtering.
 
 ### How close does it get? (as of 2026-07-24)
@@ -139,13 +136,13 @@ too, but their post-only N is already at or below published, so
 deduplicating would only pull them further away (checked directly, not
 applied to them). Their institution-count gap looks like genuinely missing
 coverage rather than duplicate inflation, and it can't be diagnosed the
-same way PCA's was (see below) -- `v12`'s institution IDs for CCA/CCI don't
+same way PCA's was (see below), `v12`'s institution IDs for CCA/CCI don't
 map to the raw LASSO export's IDs in any way currently available in this
 repo.
 
 **PCA's missing 8th institution, found:** `institution_id` 318 is present
 in the raw `pca_8_23_df.csv` (8 institutions total, matching PERC exactly)
-but absent from the processed `pca_data.csv` -- it has exactly 6 student
+but absent from the processed `pca_data.csv`, it has exactly 6 student
 records, all in one course (Spring 2017), dropped by `datascript2.R`'s
 "≥10 students per course" rule (a rule neither paper's methods section
 actually mentions). This explains the institution *count* gap, but not the
@@ -159,7 +156,7 @@ regardless of the course-size rule.
 modify the Q-matrix (which items map to which skills). It is the single
 source of truth: full history of how the Q-matrix evolved, the underlying
 27-learning-outcome taxonomy, verification against the published PERC2025
-numbers, and -- critically -- it **regenerates `Qmatrix.xlsx` from source**
+numbers, and critically it **regenerates `Qmatrix.xlsx` from source**
 (`CCD-second coding.xlsx`) rather than treating `Qmatrix.xlsx` as a
 hand-edited file that can silently drift out of sync with its own history.
 
@@ -185,11 +182,6 @@ unused_files/                     not read by any script; kept only because they
                                    plotting script)
 ```
 
-**Not in this repo:** `Articles/` (project manuscripts plus copyrighted
-third-party papers -- kept local-only since this repo is public),
-`Qmatrices/`, `Roberge_agendas/`, `Postman/`. `LASSO_downloads/` is
-git-ignored (raw data, regenerated by `download_lasso_data.Rmd`).
-
 ## Known open issues
 
 See the header comments in `IJRUME_analysis.R` and `datascript2.R`, and the
@@ -197,13 +189,13 @@ See the header comments in `IJRUME_analysis.R` and `datascript2.R`, and the
 full list with evidence. Highlights:
 
 * The CCA item-12 eligibility rule (`datascript2.R`/`.Rmd`) never matched
-  any real data in the LASSO export, silently NA-ing every CCA score --
+  any real data in the LASSO export, silently NA-ing every CCA score,
   fixed 2026-07-23 (removed; CCA now uses the same 80%-attempted rule as
   CCI). What item 12 itself actually measures is still an open question,
   just no longer gates scoring.
 * Reproducing the RUME2025 paper's Sankey/skill-profile figures requires a
   matched-pairs population that the legacy `.R` script doesn't use, and even
-  then PCA's profile transitions don't fully reproduce -- likely a
+  then PCA's profile transitions don't fully reproduce, likely a
   measurement-invariance question in how the CDM section fits pre/post
   models independently.
 * PCA's data provenance (which LASSO export, or whether it came from
@@ -212,10 +204,10 @@ full list with evidence. Highlights:
   anywhere in this repo, and can't be pulled via LASSO's API (it only
   returns item numbers/response data, never text). Confirming or extending
   the Q-matrix coding requires reviewing the test items directly in LASSO
-  or obtaining a full copy of the assessments if one exists -- not yet
+  or obtaining a full copy of the assessments (if one exists), not yet
   done. Test items are confidential and are intentionally not reproduced
-  in this repo.
-* The v12 CSVs are not frozen snapshots of what the two papers analyzed --
+  in this public repo.
+* The v12 CSVs are not frozen snapshots of what the two papers analyzed:
   their newest rows (~51 CCA rows and ~283 CCI rows, dated Fall 2024/
   Spring 2025) postdate both papers' stated data-collection windows and
   match student IDs found in a September 2025 LASSO export, meaning v12
