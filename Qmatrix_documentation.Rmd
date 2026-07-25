@@ -8,20 +8,22 @@ output:
     code_folding: hide
 params:
   write_qmatrix: false
+  run_qval: false
 ---
 
 ```{r setup, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
-required_packages <- c("dplyr", "stringr", "readxl", "writexl", "knitr", "tibble", "tidyr", "purrr")
+required_packages <- c("dplyr", "stringr", "readxl", "writexl", "knitr", "tibble", "tidyr", "purrr", "GDINA")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_packages)) {
   stop("Install the required packages before rendering: ", paste(missing_packages, collapse = ", "))
 }
 invisible(lapply(required_packages, library, character.only = TRUE))
 
-if (!exists("params")) params <- list(write_qmatrix = FALSE)
+if (!exists("params")) params <- list(write_qmatrix = FALSE, run_qval = FALSE)
 write_qmatrix <- isTRUE(params$write_qmatrix)
+run_qval <- isTRUE(params$run_qval)
 ```
 
 # Purpose
@@ -79,7 +81,7 @@ iterations side by side.
 | **Feb 12, 2025** | Builds a much more granular OpenStax-based codebook: ~162 LOs at a fine level, ~36 at a coarser section level; adds P6 (Algebra Basics) and E1 (Interpretation); codes CCI/CaCI/CCA/PCA/C2CI producing 98 item-codes. This is the 27-LO taxonomy reproduced in full below. |
 | **Feb 26, 2025** | Literature review pass: Carlson (2010, PCA), Epstein (2013, CCI), Gleason et al. (2015), Carlson et al. (2015). Explores running PCA's DINA model using Carlson's *own* original LOs, not the recoded P/L/D/AD/I scheme. |
 | **Mar 7--21, 2025** | Jayson and Kevin add P7 (graphical fluency); build a Q-matrix tab; do an item-by-item KEEP/REMOVE pass on sparsely-coded LOs for CCI and CCA. |
-| **Apr 17--25, 2025** | "Codebook is finished" at ~37 fine-grained LOs (P1--P7, L1--L5, D1--D9, AD1--AD10, I1--I7, E1) -- this is what's preserved in `unused_files/Qmatrix_intermediate_coding_stage.xlsx`'s `CCI`/`CCA`/`PCA` tabs. The **`CCD-second coding.xlsx`** workbook is created around this point, with a `2ndCoding Qs` tab holding "actual Q-matrices and suggested revisions" and a Qval-based fit-improvement pass (Qval is a DINA-model diagnostic that flags items whose empirical response pattern doesn't match their assigned Q-matrix row). |
+| **Apr 17--25, 2025** | "Codebook is finished" at ~37 fine-grained LOs (P1--P7, L1--L5, D1--D9, AD1--AD10, I1--I7, E1) -- this is what's preserved in `unused_files/Qmatrix_intermediate_coding_stage.xlsx`'s `CCI`/`CCA`/`PCA` tabs. The **`CCD-second coding.xlsx`** workbook is created around this point, with a `2ndCoding Qs` tab holding "actual Q-matrices and suggested revisions" and a Qval-based fit-improvement pass (Qval fits the saturated G-DINA model, then flags items whose empirical response pattern isn't well explained by their assigned Q-matrix row; see "Empirical Q-matrix validation" below for how it works and a from-scratch run against current data). |
 | **May 7, 2025** | Explicit statement of the operative scheme: **"For the CCD we are using five Learning Objectives: P: Prerequisite knowledge, L: Limits, D: Derivatives, AD: Applications of Derivatives, I: Introduction to Integration."** Fit statistics compared across a "full Q-matrix," a "5 LO Q-matrix," and a "5 LO Q-matrix, UPDATED from Qval" (1 change to CCA, 2 changes to CCI) -- this last one is the version reconstructed in this document. |
 | **May 21--29, 2025** | "I think what we've done for the PERC paper is fine but I would like to pursue the attribute hierarchies this summer." DINA re-run on a corrected CCA subset; "I have also updated the numbers in the PERC manuscript." |
 | **Jun 4, 2025** | PERC2025 paper submitted. |
@@ -452,6 +454,286 @@ cat("Total double-coded:", sum(double_coded$n_double_coded), "(paper says 5)\n")
 This reconstruction also reproduces the item numbering gaps the R scripts
 depend on: CCI skips items 1-2 (starts at item 3), CCA skips item 12 -- both
 match the grading-key item lists already hard-coded in `IJRUME_analysis.R`.
+
+# Empirical Q-matrix validation (Qval)
+
+PERC2025's methods describe a specific procedure for checking the Q-matrix
+against actual student response data: fit a cognitive diagnostic model,
+let it suggest changes to items whose coded skills don't explain the
+observed response pattern well, review each suggestion, and adopt the
+ones that make sense. The paper reports 24 suggested changes out of 320
+possible (64 items times 5 skills), of which 3 were adopted: 1 for CCA
+and 2 for CCI, none for PCA.
+
+That procedure has a name, Q-matrix validation (de la Torre & Chiu, 2016),
+and a specific implementation in the `GDINA` package, `Qval()`. It works
+like this:
+
+1. Fit the fully saturated G-DINA model, not DINA, using the current
+   Q-matrix. The saturated model estimates a separate success probability
+   for every possible combination of an item's coded skills, which is
+   what the next step needs.
+2. For each item, compute PVAF (proportion of variance accounted for)
+   for every candidate subset of its coded skills, from one skill up to
+   the full set. PVAF measures how much of the saturated model's
+   explanatory power a smaller subset already captures.
+3. Suggest the smallest subset that still clears a threshold, 0.95 by
+   default. This keeps the method from just recommending more skills for
+   every item, since more skills always fits training data at least as
+   well.
+4. Compare the suggestion to the item's current coding. A mismatch is a
+   suggested change, which still needs a human to check it against the
+   item's actual content before it's adopted.
+
+This section reruns that check against this document's own reconstructed
+Q-matrix (`q_cca`, `q_cci`, `q_pca` from above), using the same current,
+year-filtered analysis populations established in
+`PERC_RUME_Reproduction.Rmd`: PERC's stated year windows, post-only
+respondents, and for PCA the deduplication and eligibility-rule fixes
+that document works through in detail. This is an independent check, not
+a repeat of the original 2025 run, it uses today's data and today's
+reconstructed Q-matrix, not whatever Kevin had at the time.
+
+Slow (a saturated G-DINA fit per instrument), so gated behind
+`params$run_qval`, off by default. Set `run_qval: true` to run it.
+
+```{r qval-data, eval=run_qval}
+cci_data <- read.csv("cci_data_v12.csv", stringsAsFactors = FALSE)
+cca_data <- read.csv("cca_data_v12.csv", stringsAsFactors = FALSE)
+pca_raw <- read.csv("pca_8_23_df.csv", stringsAsFactors = FALSE)
+
+filter_by_year <- function(data, years) filter(data, year %in% years)
+
+cci_pre_key <- c(
+  pre_3 = "e", pre_4 = "e", pre_5 = "a", pre_6 = "e", pre_7 = "c",
+  pre_8 = "c", pre_9 = "b", pre_10 = "e", pre_11 = "b", pre_12 = "a",
+  pre_13 = "b", pre_14 = "a", pre_15 = "a", pre_16 = "d", pre_17 = "c",
+  pre_18 = "a", pre_19 = "b", pre_20 = "a", pre_21 = "d", pre_22 = "c",
+  pre_23 = "a", pre_24 = "a"
+)
+cci_post_key <- setNames(unname(cci_pre_key), sub("^pre_", "post_", names(cci_pre_key)))
+
+cca_pre_key <- c(
+  pre_1 = "b", pre_2 = "b", pre_3 = "b", pre_4 = "c", pre_5 = "a",
+  pre_6 = "c", pre_7 = "d", pre_8 = "c", pre_9 = "b", pre_10 = "d",
+  pre_11 = "b", pre_13 = "d", pre_14 = "b", pre_15 = "b", pre_16 = "d",
+  pre_17 = "a", pre_18 = "c"
+)
+cca_post_key <- setNames(unname(cca_pre_key), sub("^pre_", "post_", names(cca_pre_key)))
+
+score_items <- function(data, pre_key, post_key) {
+  response_columns <- c(names(pre_key), names(post_key))
+  data |>
+    mutate(across(all_of(response_columns), tolower)) |>
+    mutate(
+      across(all_of(names(pre_key)), ~ as.integer(.x == pre_key[cur_column()])),
+      across(all_of(names(post_key)), ~ as.integer(.x == post_key[cur_column()]))
+    )
+}
+
+cci_scored <- score_items(cci_data, cci_pre_key, cci_post_key)
+cca_scored <- score_items(cca_data, cca_pre_key, cca_post_key)
+
+cca_post <- filter_by_year(cca_scored, 2019:2023) |>
+  filter(!is.na(post_score)) |>
+  select(all_of(names(cca_post_key))) |>
+  setNames(paste0("q", seq_along(cca_post_key)))
+
+cci_post <- filter_by_year(cci_scored, 2021:2024) |>
+  filter(!is.na(post_score)) |>
+  select(all_of(names(cci_post_key))) |>
+  setNames(paste0("q", seq_along(cci_post_key)))
+
+# PCA: same eligibility rule (duration >= 5 min, >= 80% attempted) and
+# deduplication fix worked out in PERC_RUME_Reproduction.Rmd, applied
+# directly to the raw file rather than the pre-filtered pca_data.csv.
+pca_eligible_score <- function(score, duration, answered) {
+  if_else(
+    !is.na(score) & !is.na(duration) & !is.na(answered) &
+      duration >= 300 & answered >= 80,
+    score,
+    NA_real_
+  )
+}
+pca_item_cols <- c(paste0("pre_", 1:25, "_C"), paste0("post_", 1:25, "_C"))
+pca_data_full <- pca_raw |>
+  mutate(
+    pre_score = pca_eligible_score(pre_score, pre_duration, pre_answered),
+    post_score = pca_eligible_score(post_score, post_duration, post_answered)
+  ) |>
+  select(student_id, course_id, institution_id, year, term, student_or_la,
+         pre_score, post_score, all_of(pca_item_cols))
+
+dedup_to_latest_per_student <- function(data) {
+  term_rank <- c(Spring = 1, Summer = 2, Fall = 3)
+  data |>
+    mutate(.has_post = !is.na(post_score), .term_rank = term_rank[term]) |>
+    arrange(student_id, .has_post, year, .term_rank) |>
+    group_by(student_id) |>
+    slice_tail(n = 1) |>
+    ungroup() |>
+    select(-.has_post, -.term_rank)
+}
+
+pca_post <- pca_data_full |>
+  filter_by_year(2015:2018) |>
+  filter(student_or_la == "Student") |>
+  dedup_to_latest_per_student() |>
+  filter(!is.na(post_score)) |>
+  select(all_of(paste0("post_", 1:25, "_C"))) |>
+  setNames(paste0("q", 1:25))
+```
+
+```{r qval-fit, eval=run_qval}
+q_pca_qval <- as.matrix(q_pca[, c("P", "L", "AD", "I")])
+
+fit_saturated <- function(dat, qmatrix) {
+  valid_rows <- rowSums(!is.na(dat)) >= 2
+  GDINA::GDINA(dat = dat[valid_rows, , drop = FALSE], Q = qmatrix, model = "GDINA")
+}
+
+fit_cca_sat <- fit_saturated(cca_post, as.matrix(q_cca))
+fit_cci_sat <- fit_saturated(cci_post, as.matrix(q_cci))
+fit_pca_sat <- fit_saturated(pca_post, q_pca_qval)
+```
+
+```{r qval-run, eval=run_qval}
+qval_cca <- GDINA::Qval(fit_cca_sat, method = "PVAF", eps = 0.95)
+qval_cci <- GDINA::Qval(fit_cci_sat, method = "PVAF", eps = 0.95)
+qval_pca <- GDINA::Qval(fit_pca_sat, method = "PVAF", eps = 0.95)
+
+summarize_qval <- function(qval_obj, original_q, instrument) {
+  # GDINA::extract(what = "sug.Q") labels attributes generically ("A1".."An"
+  # in Q-matrix column order), not by the Q-matrix's actual column names,
+  # the same relabeling quirk found earlier with GDINA::CA(). Relabel
+  # before comparing.
+  suggested <- GDINA::extract(qval_obj, what = "sug.Q")
+  original <- as.matrix(original_q)
+  colnames(suggested) <- colnames(original)
+  changed <- rowSums(suggested != original) > 0
+  tibble(
+    instrument = instrument,
+    n_items = nrow(original),
+    n_suggested_changes = sum(changed),
+    changed_items = paste(rownames(original)[changed], collapse = ", ")
+  )
+}
+
+qval_summary <- bind_rows(
+  summarize_qval(qval_cca, q_cca, "CCA"),
+  summarize_qval(qval_cci, q_cci, "CCI"),
+  summarize_qval(qval_pca, q_pca[, c("P", "L", "AD", "I")], "PCA")
+)
+kable(qval_summary, caption = "Suggested Q-matrix changes against current data (PVAF, eps = 0.95)")
+```
+
+```{r qval-detail, eval=run_qval, results='asis'}
+show_changed_rows <- function(qval_obj, original_q, instrument) {
+  suggested <- GDINA::extract(qval_obj, what = "sug.Q")
+  original <- as.matrix(original_q)
+  colnames(suggested) <- colnames(original)
+  changed <- rowSums(suggested != original) > 0
+  if (!any(changed)) {
+    cat("**", instrument, "**: no changes suggested against current data.\n\n", sep = "")
+    return(invisible())
+  }
+  cat("**", instrument, "**, items where the current data suggests a different coding:\n\n", sep = "")
+  print(kable(
+    tibble(
+      item = rownames(original)[changed],
+      current_coding = apply(original[changed, , drop = FALSE], 1,
+                              function(r) paste(colnames(original)[r == 1], collapse = "+")),
+      suggested_coding = apply(suggested[changed, , drop = FALSE], 1,
+                                function(r) paste(colnames(suggested)[r == 1], collapse = "+"))
+    )
+  ))
+  cat("\n")
+}
+
+show_changed_rows(qval_cca, q_cca, "CCA")
+show_changed_rows(qval_cci, q_cci, "CCI")
+show_changed_rows(qval_pca, q_pca[, c("P", "L", "AD", "I")], "PCA")
+```
+
+**Read the counts above with real caution, not as a verdict on the
+Q-matrix.** The suggestion rate here (5 of 17 CCA, 7 of 22 CCI, 10 of 25
+PCA, all much higher than the paper's original 24 of 320, about 7.5%) is
+high enough that it's worth naming two reasons before treating any of it
+as a finding:
+
+1. This is checked against today's data (the post-append `v12` files,
+   current year windows, PCA's dedup fix), not whatever population
+   produced the original 3 adopted changes. Some of the difference is a
+   data-population difference, not necessarily the Q-matrix being wrong.
+2. `Qval()`'s own documentation warns about exactly this pattern: "If too
+   many modifications are suggested based on the default PVAF method, you
+   are suggested to try the stepwise Wald test method, iterative
+   procedures or predicted cutoffs." A high suggestion count, especially
+   one made mostly of additions rather than removals, is a known symptom
+   of the default PVAF threshold being too permissive when attributes are
+   correlated, which they are here (PCA's Prerequisites and Limits
+   attribute estimates correlate around 0.67, see
+   `PERC_RUME_Reproduction.Rmd`'s Limits classification-accuracy
+   discussion).
+
+The stepwise Wald test is the package's own recommended cross-check for
+this situation:
+
+```{r qval-wald-check, eval=run_qval}
+# GDINA's stepwise Wald implementation errors out on PCA's Q-matrix
+# ("non-conformable arrays" inside GDINA:::score_pj) as of package version
+# 2.9.12, an internal package limitation rather than anything about this
+# project's data or Q-matrix, worth knowing rather than hiding. Wrapped
+# per instrument so one failure doesn't take down the other two.
+run_wald <- function(fit, label) {
+  tryCatch(
+    GDINA::Qval(fit, method = "wald"),
+    error = function(e) {
+      cat("Wald test failed for", label, ":", conditionMessage(e), "\n")
+      NULL
+    }
+  )
+}
+
+qval_cca_wald <- run_wald(fit_cca_sat, "CCA")
+qval_cci_wald <- run_wald(fit_cci_sat, "CCI")
+qval_pca_wald <- run_wald(fit_pca_sat, "PCA")
+
+qval_wald_summary <- bind_rows(
+  if (!is.null(qval_cca_wald)) summarize_qval(qval_cca_wald, q_cca, "CCA"),
+  if (!is.null(qval_cci_wald)) summarize_qval(qval_cci_wald, q_cci, "CCI"),
+  if (!is.null(qval_pca_wald)) summarize_qval(qval_pca_wald, q_pca[, c("P", "L", "AD", "I")], "PCA")
+)
+kable(qval_wald_summary, caption = "Suggested Q-matrix changes, stepwise Wald test (cross-check against the PVAF results above)")
+```
+
+```{r qval-wald-detail, eval=run_qval, results='asis'}
+if (!is.null(qval_cca_wald)) show_changed_rows(qval_cca_wald, q_cca, "CCA")
+if (!is.null(qval_cci_wald)) show_changed_rows(qval_cci_wald, q_cci, "CCI")
+if (!is.null(qval_pca_wald)) {
+  show_changed_rows(qval_pca_wald, q_pca[, c("P", "L", "AD", "I")], "PCA")
+} else {
+  cat("**PCA**: stepwise Wald test errored out for this instrument (see the note above); no result to show.\n\n")
+}
+```
+
+The Wald test suggests far fewer changes than PVAF, 1 item each for CCA
+and CCI instead of 5 and 7, which is the more trustworthy of the two given
+`Qval()`'s own guidance above. That's a much closer match to the paper's
+original low change rate, and a reasonable read is that most of the raw
+PVAF list is noise from correlated attributes rather than real
+miscoding, with a small number of items, the ones both methods agree on
+or that the Wald test flags on its own, worth an actual look at the item
+content if that ever becomes possible.
+
+Any changes shown above are statistical suggestions only, exactly like the
+paper's own process, they need a substantive check against what each item
+actually asks before treating them as a reason to touch `Qmatrix.xlsx`,
+and this project doesn't currently have access to the actual item text to
+do that check (see "What's missing: item text" below). This section flags
+candidates; it doesn't adopt them automatically, and `Qmatrix.xlsx` should
+stay derived from `CCD-second coding.xlsx` unless a change is deliberately
+reviewed and folded back into that source workbook.
 
 # Generating Qmatrix.xlsx
 
